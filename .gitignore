@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.next/
+.data/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Mock proof runs are throwaway — regenerate them any time with
+# `npm run prove:tingle-live` / `prove:tingle-heal`. Only live runs are
+# evidence worth keeping.
+docs/proof/**/*-mock-*.json

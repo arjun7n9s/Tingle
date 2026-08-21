@@ -1,0 +1,18 @@
+{
+  "name": "tingle",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A claim watch for builders — first look at the public web, then keep watching",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @tingle/core",
+    "typecheck": "npm run typecheck -w @tingle/core",
+    "prove:tingle-live": "npm run prove:live -w @tingle/core",
+    "prove:tingle-heal": "npm run prove:heal -w @tingle/core"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
