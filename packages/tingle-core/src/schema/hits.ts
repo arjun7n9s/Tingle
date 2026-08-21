@@ -82,14 +82,35 @@ export function domainFromUrl(url: string): string {
  * way to make a normalizer look tidy, and it hides exactly the breakage this
  * layer exists to catch. Missing stays missing; the schema decides.
  */
-export function normalizeRow(source: HitSource, row: unknown): unknown {
+export type NormalizeOptions = {
+  /**
+   * Fall back to the trigger input's url when a row carries none.
+   *
+   * Off by default, and that default is load-bearing. It is only correct for
+   * single-page (PDP) collectors, where the row genuinely *is* the page that
+   * was requested. On a listing shape it actively hides breakage: a watch
+   * collector that stopped extracting per-item links returned rows whose url
+   * silently resolved to the listing page itself, so `url` never appeared in
+   * the validation issues and the heal prompt was built from an incomplete
+   * picture of what had broken.
+   */
+  allowInputUrlFallback?: boolean;
+};
+
+export function normalizeRow(
+  source: HitSource,
+  row: unknown,
+  opts: NormalizeOptions = {},
+): unknown {
   if (!row || typeof row !== "object") return row;
   const r = row as Record<string, unknown>;
 
   // Studio sometimes nests the trigger input alongside the extracted fields.
   const input = (r.input ?? {}) as Record<string, unknown>;
 
-  const url = str(pick(r, ALIASES.url)) || str(input.url);
+  const url =
+    str(pick(r, ALIASES.url)) ||
+    (opts.allowInputUrlFallback ? str(input.url) : "");
   const publishedRaw = pick(r, ALIASES.published_at);
 
   return {

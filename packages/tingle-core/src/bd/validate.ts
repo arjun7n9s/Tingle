@@ -3,6 +3,7 @@ import {
   normalizeRow,
   type HitRow,
   type HitSource,
+  type NormalizeOptions,
 } from "../schema/hits.js";
 
 export type IssueDetail = { row: number; path: string; message: string };
@@ -27,6 +28,7 @@ export type ValidationResult = {
 export function validateRows(
   source: HitSource,
   rows: unknown[],
+  opts: NormalizeOptions = {},
 ): ValidationResult {
   const ok: HitRow[] = [];
   const issues: string[] = [];
@@ -45,7 +47,7 @@ export function validateRows(
   }
 
   for (const [i, row] of rows.entries()) {
-    const parsed = HitRowSchema.safeParse(normalizeRow(source, row));
+    const parsed = HitRowSchema.safeParse(normalizeRow(source, row, opts));
     if (parsed.success) {
       ok.push(parsed.data);
       continue;
