@@ -23,3 +23,6 @@ docs/proof/live/
 # Working strategy docs — named third parties, comps, trademark notes.
 # Kept in the working folder for reference, never published.
 docs/internal/
+
+# Progress log — names the scrape targets, which the published tree does not.
+progress.md
