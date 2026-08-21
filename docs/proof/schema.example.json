@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "Shape reference for a collect run (prove:tingle-live). Every value below",
+    "is invented — no real site was scraped to produce this file.",
+    "Real collect runs are gitignored, because evidencing a live scrape means",
+    "recording someone else's URLs and titles. Run the script yourself to see",
+    "the real thing; it writes to docs/proof/live/, which stays on your disk."
+  ],
+  "mode": "live",
+  "at": "2026-01-01T00:00:00.000Z",
+  "claim": "the one confirmed sentence this watch is built around",
+  "collectors": [
+    {
+      "key": "search",
+      "collector_id": "c_example00000000",
+      "target": "keyword: the claim, or an interpolated search url"
+    },
+    {
+      "key": "watch",
+      "collector_id": "c_example11111111",
+      "target": "https://board.example/"
+    },
+    {
+      "key": "chaos",
+      "collector_id": "c_example22222222",
+      "target": "https://arjun7n9s.github.io/Tingle/fixtures/tingle-chaos/"
+    }
+  ],
+  "skipped": [],
+  "sources_used": ["search", "watch", "chaos"],
+  "collectors_failed": [],
+  "results": [
+    {
+      "source": "watch",
+      "collector_id": "c_example11111111",
+      "valid_rows": 2,
+      "healed": false,
+      "awaiting_approval": false,
+      "error": null,
+      "hits": [
+        {
+          "source": "watch",
+          "title": "Example Product One",
+          "url": "https://board.example/p/example-product-one",
+          "snippet": "One sentence describing what the listing says it does.",
+          "published_at": "2026-01-01",
+          "source_domain": "board.example"
+        },
+        {
+          "source": "watch",
+          "title": "Example Product Two",
+          "url": "https://board.example/p/example-product-two",
+          "snippet": "Another synthetic row, same frozen field names.",
+          "published_at": "2025-12-28",
+          "source_domain": "board.example"
+        }
+      ],
+      "heal_events": []
+    },
+    {
+      "source": "chaos",
+      "collector_id": "c_example22222222",
+      "valid_rows": 4,
+      "healed": true,
+      "awaiting_approval": false,
+      "error": null,
+      "hits": [],
+      "heal_events": [
+        {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "at": "2026-01-01T00:00:01.000Z",
+          "collector_id": "c_example22222222",
+          "collector": "chaos",
+          "stage": "validation_failed",
+          "detail": "4 row(s) failed the schema for chaos — treating as an extractor incident, not an empty result",
+          "zod_issues": ["[row 0] title: empty title — extractor likely broken"]
+        },
+        {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "at": "2026-01-01T00:00:02.000Z",
+          "collector_id": "c_example22222222",
+          "collector": "chaos",
+          "stage": "retry_succeeded",
+          "detail": "Recovered 4 row(s) from c_example22222222 — same collector id"
+        }
+      ]
+    }
+  ]
+}

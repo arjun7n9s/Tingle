@@ -74,9 +74,16 @@ npm run prove:tingle-heal   # break → validation fails → heal → approve �
 Artifacts land under `docs/proof/`, stamped `mode: "mock" | "live"` so a mock
 run can never be mistaken for a live one. Tokens are never written to disk.
 
-The heal proof is the one that matters: the collector id is identical before
-and after the repair, and no application code changes. To stage a real DOM
-break, see [fixtures/tingle-chaos/README.md](fixtures/tingle-chaos/README.md).
+The heal proof is the one that matters, and the only one committed: the
+collector id is identical before and after the repair, and no application code
+changes. To stage a real DOM break, see
+[fixtures/tingle-chaos/README.md](fixtures/tingle-chaos/README.md).
+
+Collect runs stay local — evidencing a live scrape means recording someone
+else's URLs and titles, so those artifacts are gitignored. Clone the repo, pin
+your own collectors, and run the script to produce them.
+[docs/proof/schema.example.json](docs/proof/schema.example.json) documents the
+shape with invented rows.
 
 ## Public data only
 

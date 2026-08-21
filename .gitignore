@@ -8,6 +8,11 @@ dist/
 .DS_Store
 
 # Mock proof runs are throwaway — regenerate them any time with
-# `npm run prove:tingle-live` / `prove:tingle-heal`. Only live runs are
-# evidence worth keeping.
+# `npm run prove:tingle-live` / `prove:tingle-heal`.
 docs/proof/**/*-mock-*.json
+
+# Collect runs record the URLs and titles of whatever they scraped. You cannot
+# evidence a live scrape without other people's content, so these stay local.
+# The chaos heal proof is committed instead: the fixture it scrapes is ours,
+# and the heal round trip is the claim that actually needs proving.
+docs/proof/live/
