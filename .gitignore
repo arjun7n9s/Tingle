@@ -16,3 +16,10 @@ docs/proof/**/*-mock-*.json
 # The chaos heal proof is committed instead: the fixture it scrapes is ours,
 # and the heal round trip is the claim that actually needs proving.
 docs/proof/live/
+
+# Raw `scraper create` envelopes — collector ids get pinned into .env instead
+.creates/
+
+# Working strategy docs — named third parties, comps, trademark notes.
+# Kept in the working folder for reference, never published.
+docs/internal/
