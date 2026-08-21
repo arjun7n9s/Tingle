@@ -1,0 +1,137 @@
+{
+  "mode": "live",
+  "at": "2026-08-21T22:53:03.453Z",
+  "collector_id_before": "c_mt3jbbz21pal4p4vgp",
+  "collector_id_after": "c_mt3jbbz21pal4p4vgp",
+  "collector_ids_seen": [
+    "c_mt3jbbz21pal4p4vgp"
+  ],
+  "target": "https://arjun7n9s.github.io/Tingle/fixtures/tingle-chaos/",
+  "checks": [
+    {
+      "name": "validation caught the break",
+      "pass": true
+    },
+    {
+      "name": "heal prompt built from validation issues",
+      "pass": true
+    },
+    {
+      "name": "retry ran",
+      "pass": true
+    },
+    {
+      "name": "retry recovered valid rows",
+      "pass": true
+    },
+    {
+      "name": "rows are schema-valid",
+      "pass": true
+    },
+    {
+      "name": "collector id unchanged throughout",
+      "pass": true
+    }
+  ],
+  "healed": true,
+  "valid_rows_after_heal": 4,
+  "error": null,
+  "heal_timeline": [
+    {
+      "id": "c95d89fb-01fd-44cf-8244-b3b9a35d4e21",
+      "at": "2026-08-21T22:51:53.058Z",
+      "collector_id": "c_mt3jbbz21pal4p4vgp",
+      "collector": "chaos",
+      "stage": "validation_failed",
+      "detail": "all row(s) failed the schema for chaos — treating as an extractor incident, not an empty result",
+      "zod_issues": [
+        "empty dataset — collector returned 0 rows"
+      ]
+    },
+    {
+      "id": "5c2cab5a-3cd8-4fd8-8675-ceb74e1e548e",
+      "at": "2026-08-21T22:51:53.059Z",
+      "collector_id": "c_mt3jbbz21pal4p4vgp",
+      "collector": "chaos",
+      "stage": "heal_started",
+      "detail": "The chaos collector failed schema validation, most likely after a layout change on the target page. Problems: (dataset): collector returned 0 rows. Re-extract using plain-language descriptions of the content rather than brittle selectors. Keep exactly these JSON field names: title, url, snippet, published_at, source_domain. published_at must be an ISO date or null. Fix the selectors for the current DOM.",
+      "zod_issues": [
+        "empty dataset — collector returned 0 rows"
+      ]
+    },
+    {
+      "id": "7cab8e29-a962-4460-8c75-02a75e71dacc",
+      "at": "2026-08-21T22:52:57.157Z",
+      "collector_id": "c_mt3jbbz21pal4p4vgp",
+      "collector": "chaos",
+      "stage": "heal_approved",
+      "detail": "Heal approved and saved (flagged run)",
+      "preview": [
+        {
+          "title": "ClaimWatch",
+          "url": "https://chaos.example/launch/claimwatch",
+          "snippet": "Tells solo builders when somebody else ships the ...ilding. Watches launch boards and release notes.",
+          "published_at": {},
+          "source_domain": "chaos.example"
+        },
+        {
+          "title": "PriorArt Radar",
+          "url": "https://chaos.example/launch/priorart-radar",
+          "snippet": "Weekly digest of new filings and preprints that m... saved one-sentence description of your project.",
+          "published_at": {},
+          "source_domain": "chaos.example"
+        }
+      ]
+    },
+    {
+      "id": "82a1968b-bae1-46a6-be80-fb3c9977031c",
+      "at": "2026-08-21T22:52:57.157Z",
+      "collector_id": "c_mt3jbbz21pal4p4vgp",
+      "collector": "chaos",
+      "stage": "retry_started",
+      "detail": "Re-triggering c_mt3jbbz21pal4p4vgp after heal"
+    },
+    {
+      "id": "c231cfc1-8f31-4ae0-a3e9-7790b3df8f9e",
+      "at": "2026-08-21T22:53:03.452Z",
+      "collector_id": "c_mt3jbbz21pal4p4vgp",
+      "collector": "chaos",
+      "stage": "retry_succeeded",
+      "detail": "Recovered 4 row(s) from c_mt3jbbz21pal4p4vgp — same collector id"
+    }
+  ],
+  "hits": [
+    {
+      "source": "chaos",
+      "title": "ClaimWatch",
+      "url": "https://chaos.example/launch/claimwatch",
+      "snippet": "Tells solo builders when somebody else ships the thing they are halfway through building. Watches launch boards and release notes.",
+      "published_at": "2026-08-20T00:00:00.000Z",
+      "source_domain": "chaos.example"
+    },
+    {
+      "source": "chaos",
+      "title": "PriorArt Radar",
+      "url": "https://chaos.example/launch/priorart-radar",
+      "snippet": "Weekly digest of new filings and preprints that match a saved one-sentence description of your project.",
+      "published_at": "2026-08-18T00:00:00.000Z",
+      "source_domain": "chaos.example"
+    },
+    {
+      "source": "chaos",
+      "title": "NicheFill",
+      "url": "https://chaos.example/launch/nichefill",
+      "snippet": "Directory of indie products grouped by the job they do, updated daily from public launch pages.",
+      "published_at": "2026-08-11T00:00:00.000Z",
+      "source_domain": "chaos.example"
+    },
+    {
+      "source": "chaos",
+      "title": "ScrapeKeeper",
+      "url": "https://chaos.example/launch/scrapekeeper",
+      "snippet": "Hosted extractors that repair their own selectors when a target site redesigns, so downstream pipelines keep the same collector id.",
+      "published_at": "2026-07-29T00:00:00.000Z",
+      "source_domain": "chaos.example"
+    }
+  ]
+}
