@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const HitSourceSchema = z.enum(["search", "watch", "chaos"]);
+/**
+ * `search` / `watch` / `chaos` are owned Studio collectors — the ones we heal.
+ * `adjunct` is a public JSON API (HN, arXiv, a repo's own REST endpoint):
+ * always labelled, never the only path, and never healed, because we do not
+ * own its selectors.
+ */
+export const HitSourceSchema = z.enum(["search", "watch", "chaos", "adjunct"]);
 export type HitSource = z.infer<typeof HitSourceSchema>;
 
 /**

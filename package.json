@@ -10,7 +10,9 @@
     "build": "npm run build -w @tingle/core",
     "typecheck": "npm run typecheck -w @tingle/core",
     "prove:tingle-live": "npm run prove:live -w @tingle/core",
-    "prove:tingle-heal": "npm run prove:heal -w @tingle/core"
+    "prove:tingle-heal": "npm run prove:heal -w @tingle/core",
+    "first-look": "npm run first-look -w @tingle/core --",
+    "serve": "npm run serve -w @tingle/core"
   },
   "engines": {
     "node": ">=20"

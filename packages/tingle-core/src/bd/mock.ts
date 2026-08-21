@@ -90,6 +90,28 @@ function stamp(source: HitSource, rows: typeof CHAOS_ROWS) {
   return rows.map((r) => ({ ...r, source }));
 }
 
+/**
+ * Stand-ins for the public JSON APIs, so a first look can be exercised with no
+ * network at all. Reusable-looking hosts on purpose, to cover the
+ * "stand on this" branch of the pile logic.
+ */
+const ADJUNCT_ROWS = [
+  {
+    title: "watchdog-core",
+    url: "https://github.com/example-org/watchdog-core",
+    snippet:
+      "Library for diffing scraped listings against a stored baseline and emitting only what changed.",
+    published_at: "2026-08-15",
+  },
+  {
+    title: "On silent failure in extraction pipelines",
+    url: "https://arxiv.org/abs/2608.09999",
+    snippet:
+      "Preprint arguing that an empty result set is the most expensive failure mode in monitoring systems, because absence reads as evidence.",
+    published_at: "2026-08-02",
+  },
+];
+
 export function mockRows(source: HitSource): unknown[] {
   switch (source) {
     case "chaos":
@@ -98,6 +120,8 @@ export function mockRows(source: HitSource): unknown[] {
       return stamp(source, WATCH_ROWS);
     case "search":
       return stamp(source, SEARCH_ROWS);
+    case "adjunct":
+      return stamp(source, ADJUNCT_ROWS);
   }
 }
 

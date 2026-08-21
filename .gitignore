@@ -26,3 +26,6 @@ docs/internal/
 
 # Progress log — names the scrape targets, which the published tree does not.
 progress.md
+
+# Local first-look request fixtures
+.fixtures/

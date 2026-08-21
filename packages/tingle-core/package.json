@@ -16,7 +16,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
     "prove:live": "tsx src/scripts/prove-live.ts",
-    "prove:heal": "tsx src/scripts/prove-heal.ts"
+    "prove:heal": "tsx src/scripts/prove-heal.ts",
+    "first-look": "tsx src/scripts/first-look.ts",
+    "serve": "tsx src/scripts/serve.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
