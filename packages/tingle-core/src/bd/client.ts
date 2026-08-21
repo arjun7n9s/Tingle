@@ -178,7 +178,11 @@ export class BrightDataClient {
     opts: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<HealProgress> {
     requireCollector(collectorId);
-    const timeoutMs = opts.timeoutMs ?? 600_000;
+    // 15 minutes, not 10. A heal asked for a field the page does not actually
+    // contain loops through css_selector_extractor → code_fixer →
+    // step_preview_runner many times before settling, and timing out mid-loop
+    // leaves a job still running server-side that you then reconcile by hand.
+    const timeoutMs = opts.timeoutMs ?? 900_000;
     const intervalMs = opts.intervalMs ?? 5_000;
     const started = Date.now();
 

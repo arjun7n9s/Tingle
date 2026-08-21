@@ -10,9 +10,18 @@ export type TingleConfig = {
   /** Public chaos fixture URL (must be reachable by Bright Data). */
   chaosUrl?: string;
   /**
-   * If the search collector was created against a search-results URL, this
-   * template carries the keyword. `{q}` is replaced with the URL-encoded
-   * claim. When unset we send `{ keyword, country }` instead.
+   * Fixed listing URL for the search lane.
+   *
+   * This lane is a Discovery collector over a public community listing, not a
+   * site's own search endpoint. Search endpoints turned out to be a dead end:
+   * they are near-universally disallowed in robots.txt, and the one we tried
+   * rendered results client-side, so AI generation errored with no DOM to
+   * derive a schema from. Ranking rows against the claim happens in our code.
+   */
+  searchUrl?: string;
+  /**
+   * Only for a collector built against a query-string search page. `{q}` is
+   * replaced with the URL-encoded claim. Normally unset.
    */
   searchUrlTemplate?: string;
   searchCountry?: string;
@@ -48,6 +57,7 @@ export function loadTingleConfig(
     },
     watchUrl: env.TINGLE_WATCH_URL?.trim() || undefined,
     chaosUrl: env.TINGLE_CHAOS_URL?.trim() || undefined,
+    searchUrl: env.TINGLE_SEARCH_URL?.trim() || undefined,
     searchUrlTemplate: env.TINGLE_SEARCH_URL_TEMPLATE?.trim() || undefined,
     searchCountry: env.TINGLE_SEARCH_COUNTRY?.trim() || undefined,
     sampleClaim:

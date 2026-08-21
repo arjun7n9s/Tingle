@@ -76,6 +76,7 @@ function buildInputs(
   claim: string,
 ): { inputs: TriggerInput[]; target: string } | { reason: string } {
   if (key === "search") {
+    // A collector built against a query-string search page (rare).
     if (config.searchUrlTemplate) {
       const url = config.searchUrlTemplate.replace(
         "{q}",
@@ -83,6 +84,13 @@ function buildInputs(
       );
       return { inputs: [{ url }], target: url };
     }
+    // The normal case: a fixed community listing. Every row comes back and the
+    // claim is matched against them downstream, rather than asking the site to
+    // run the query for us.
+    if (config.searchUrl) {
+      return { inputs: [{ url: config.searchUrl }], target: config.searchUrl };
+    }
+    // Last resort, for a genuinely keyword-input collector.
     const input: TriggerInput = { keyword: claim };
     if (config.searchCountry) input.country = config.searchCountry;
     return { inputs: [input], target: `keyword: ${claim}` };
