@@ -40,10 +40,22 @@ export function classifyHealStatus(
  * a new pinned id in env — not a code change.
  */
 export class BrightDataClient {
+  /** Every Tingle job records `POST /dca/trigger` here — never a dashboard run. */
+  readonly triggerLog: { at: string; collectorId: string; path: "/dca/trigger" }[] =
+    [];
+
   constructor(private readonly config: TingleConfig) {}
 
   get mock() {
     return this.config.mock;
+  }
+
+  noteTransport(path: "/dca/trigger", collectorId: string): void {
+    this.triggerLog.push({
+      at: new Date().toISOString(),
+      collectorId,
+      path,
+    });
   }
 
   private headers() {
@@ -63,13 +75,52 @@ export class BrightDataClient {
     return res.json().catch(() => ({}));
   }
 
+  /**
+   * `GET /dca/collectors_list` — reuse an existing c_* rather than creating.
+   * https://docs.brightdata.com/api-reference/scraper-studio-api/list-scrapers
+   */
+  async listCollectors(): Promise<
+    { id: string; name: string; status?: string }[]
+  > {
+    const res = await this.fetchRetry(
+      this.url("/dca/collectors_list"),
+      { headers: this.headers() },
+    );
+    const body = await this.json(res);
+    if (!res.ok) {
+      throw new BrightDataError("list collectors failed", res.status, body);
+    }
+    const rows = Array.isArray(body)
+      ? body
+      : ((body as { data?: unknown[] }).data ?? []);
+    return rows
+      .map((c) => {
+        const row = c as {
+          id?: string;
+          collector_id?: string;
+          name?: string;
+          status?: string;
+          active?: boolean;
+        };
+        return {
+          id: row.id ?? row.collector_id ?? "",
+          name: row.name ?? "",
+          status:
+            row.status ??
+            (row.active === false ? "inactive" : row.active ? "active" : undefined),
+        };
+      })
+      .filter((c) => c.id);
+  }
+
   /** `POST /dca/trigger` — the production path for every Tingle job. */
   async triggerCollection(
     collectorId: string,
     inputs: TriggerInput[],
   ): Promise<string> {
     requireCollector(collectorId);
-    const res = await fetch(
+    this.noteTransport("/dca/trigger", collectorId);
+    const res = await this.fetchRetry(
       this.url("/dca/trigger", { collector: collectorId, queue_next: "1" }),
       { method: "POST", headers: this.headers(), body: JSON.stringify(inputs) },
     );
@@ -114,10 +165,15 @@ export class BrightDataClient {
     const started = Date.now();
 
     while (Date.now() - started < timeoutMs) {
-      const res = await fetch(this.url("/dca/dataset", { id: collectionId }), {
-        headers: this.headers(),
-      });
+      const res = await this.fetchRetry(
+        this.url("/dca/dataset", { id: collectionId }),
+        { headers: this.headers() },
+      );
       const body = await this.json(res);
+      if (res.status === 202) {
+        await sleep(intervalMs);
+        continue;
+      }
 
       if (Array.isArray(body)) {
         if (body.length > 0) return body;
@@ -178,11 +234,7 @@ export class BrightDataClient {
     opts: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<HealProgress> {
     requireCollector(collectorId);
-    // 15 minutes, not 10. A heal asked for a field the page does not actually
-    // contain loops through css_selector_extractor → code_fixer →
-    // step_preview_runner many times before settling, and timing out mid-loop
-    // leaves a job still running server-side that you then reconcile by hand.
-    const timeoutMs = opts.timeoutMs ?? 900_000;
+    const timeoutMs = opts.timeoutMs ?? 600_000;
     const intervalMs = opts.intervalMs ?? 5_000;
     const started = Date.now();
 
@@ -244,6 +296,36 @@ export class BrightDataClient {
       );
     }
     return body;
+  }
+
+  /**
+   * Retry 5xx / network the way Bright Data's Node sample does. 4xx fails
+   * fast except 429, which backs off.
+   */
+  private async fetchRetry(
+    url: string,
+    init: RequestInit,
+    attempts = 3,
+  ): Promise<Response> {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetch(url, init);
+        if (res.status >= 500 || res.status === 429) {
+          lastErr = new BrightDataError(`transient ${res.status}`, res.status);
+          await sleep(1_000 * (i + 1));
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        await sleep(1_000 * (i + 1));
+      }
+    }
+    if (lastErr instanceof BrightDataError) throw lastErr;
+    throw lastErr instanceof Error
+      ? lastErr
+      : new BrightDataError(String(lastErr));
   }
 }
 

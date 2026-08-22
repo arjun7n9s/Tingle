@@ -33,3 +33,35 @@ export const HealEventSchema = z.object({
 });
 
 export type HealEvent = z.infer<typeof HealEventSchema>;
+
+export const TingleEventTypeSchema = z.enum([
+  "already_exists",
+  "building",
+  "just_shipped",
+  "paper_patent",
+  "ai_default",
+  "discussion",
+]);
+export type TingleEventType = z.infer<typeof TingleEventTypeSchema>;
+
+export const UrgencySchema = z.enum(["now", "soon", "note", "quiet"]);
+export type Urgency = z.infer<typeof UrgencySchema>;
+
+export const TingleEventSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  at: z.string(),
+  type: TingleEventTypeSchema,
+  urgency: UrgencySchema,
+  claim_fingerprint: z.string(),
+  entity_key: z.string(),
+  content_hash: z.string(),
+  sources: z.array(
+    z.object({
+      collector: z.string(),
+      url: z.string(),
+    }),
+  ),
+  hit_ids: z.array(z.string()),
+});
+export type TingleEvent = z.infer<typeof TingleEventSchema>;

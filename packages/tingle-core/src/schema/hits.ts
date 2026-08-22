@@ -1,13 +1,8 @@
 import { z } from "zod";
 
-/**
- * `search` / `watch` / `chaos` are owned Studio collectors — the ones we heal.
- * `adjunct` is a public JSON API (HN, arXiv, a repo's own REST endpoint):
- * always labelled, never the only path, and never healed, because we do not
- * own its selectors.
- */
-export const HitSourceSchema = z.enum(["search", "watch", "chaos", "adjunct"]);
+export const HitSourceSchema = z.enum(["search", "watch", "chaos"]);
 export type HitSource = z.infer<typeof HitSourceSchema>;
+export type CollectorKey = HitSource;
 
 /**
  * The one row shape every Tingle collector returns. Field names are frozen —
@@ -84,39 +79,17 @@ export function domainFromUrl(url: string): string {
  * that must still reach the validator as a failure.
  *
  * Deliberately assigns no fallback values to required fields. Defaulting a
- * missing title to "unknown" or a missing url to a placeholder is a tempting
- * way to make a normalizer look tidy, and it hides exactly the breakage this
- * layer exists to catch. Missing stays missing; the schema decides.
+ * missing title to "unknown" (as Changelog Radar's normalizer does for
+ * package_name) would hide exactly the breakage we are trying to detect.
  */
-export type NormalizeOptions = {
-  /**
-   * Fall back to the trigger input's url when a row carries none.
-   *
-   * Off by default, and that default is load-bearing. It is only correct for
-   * single-page (PDP) collectors, where the row genuinely *is* the page that
-   * was requested. On a listing shape it actively hides breakage: a watch
-   * collector that stopped extracting per-item links returned rows whose url
-   * silently resolved to the listing page itself, so `url` never appeared in
-   * the validation issues and the heal prompt was built from an incomplete
-   * picture of what had broken.
-   */
-  allowInputUrlFallback?: boolean;
-};
-
-export function normalizeRow(
-  source: HitSource,
-  row: unknown,
-  opts: NormalizeOptions = {},
-): unknown {
+export function normalizeRow(source: HitSource, row: unknown): unknown {
   if (!row || typeof row !== "object") return row;
   const r = row as Record<string, unknown>;
 
   // Studio sometimes nests the trigger input alongside the extracted fields.
   const input = (r.input ?? {}) as Record<string, unknown>;
 
-  const url =
-    str(pick(r, ALIASES.url)) ||
-    (opts.allowInputUrlFallback ? str(input.url) : "");
+  const url = str(pick(r, ALIASES.url)) || str(input.url);
   const publishedRaw = pick(r, ALIASES.published_at);
 
   return {
