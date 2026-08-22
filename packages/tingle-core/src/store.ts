@@ -1,235 +1,515 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+import fs from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
+import { tingleDataDir } from "./paths.js";
+import { normalizeBudget, PAUSE_COPY } from "./budget.js";
+import type { FirstLookResult } from "./jobs/firstLook.js";
+import type { OutgoingMail } from "./mail.js";
+import type { TingleEvent } from "./schema/events.js";
 import {
-  SessionSchema,
-  UserSchema,
-  sessionValid,
-  type Session,
-  type User,
-} from "./auth.js";
-import { WatchProfileSchema, type WatchProfile } from "./schema/profile.js";
+  DEFAULT_BUDGET,
+  type Budget,
+  type DigestFloor,
+  type Stage,
+  type WatchProfile,
+} from "./schema/profile.js";
+import { VAULT_PROMISE, newDek, open, seal, unwrapDek, wrapDek } from "./vault.js";
 
-export const BaselineEntrySchema = z.object({
-  id: z.string(),
-  url: z.string(),
-  origin: z.string(),
-  /** Detects "this page changed" on a later run. */
-  content_hash: z.string(),
-  first_seen: z.string(),
-});
+const scrypt = promisify(scryptCb);
 
-export const BaselineSchema = z.object({
-  project_id: z.string(),
-  /** Ties the baseline to the exact claim it was built for. */
-  claim_lock: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  entries: z.array(BaselineEntrySchema).default([]),
-});
+export type User = {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+  wrapped_dek: string;
+};
 
-export type Baseline = z.infer<typeof BaselineSchema>;
+export type Session = {
+  id: string;
+  user_id: string;
+  expires_at: string;
+};
 
-/**
- * File-backed project storage.
- *
- * Deliberately plain for now. Phase 5 replaces the backend with an encrypted
- * vault, and the file shape is identical either way — storage is the only thing
- * that changes, which is also what makes a repo-local `.tingle/` tree a swap
- * rather than a rewrite.
- */
-export class ProjectStore {
-  constructor(private readonly rootDir: string) {}
+export type ChatMessage = {
+  id: string;
+  role: "user" | "analyst";
+  text: string;
+  at: string;
+};
 
-  private dir(projectId: string) {
-    return path.join(this.rootDir, "projects", projectId);
+export type StoredProject = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  stage: Stage;
+  extra_question?: string;
+  pitch?: string;
+  docs_text?: string;
+  links: string[];
+  github_url?: string;
+  watch_list: string[];
+  patent_number?: string;
+  ignore: string[];
+  claim: string;
+  claim_confirmed: boolean;
+  claim_locked: boolean;
+  draft_claim?: string;
+  profile?: WatchProfile;
+  last_look?: FirstLookResult;
+  messages: ChatMessage[];
+  tingle_on: boolean;
+  alert_email?: string;
+  digest_floor: DigestFloor;
+  budget: Budget;
+  paused: boolean;
+  paused_reason?: string;
+  events: TingleEvent[];
+  last_tick_at?: string;
+  last_digest_at?: string;
+  mail: OutgoingMail[];
+  stealth: boolean;
+  collectors: string[];
+  revoked: boolean;
+};
+
+type ProjectSecrets = {
+  stage: Stage;
+  extra_question?: string;
+  pitch?: string;
+  docs_text?: string;
+  links: string[];
+  github_url?: string;
+  watch_list: string[];
+  patent_number?: string;
+  ignore: string[];
+  claim: string;
+  claim_confirmed: boolean;
+  claim_locked: boolean;
+  draft_claim?: string;
+  profile?: WatchProfile;
+  last_look?: FirstLookResult;
+  messages: ChatMessage[];
+  events: TingleEvent[];
+  mail: OutgoingMail[];
+  stealth: boolean;
+};
+
+type DiskProject = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  budget: Budget;
+  tingle_on: boolean;
+  paused: boolean;
+  paused_reason?: string;
+  alert_email?: string;
+  digest_floor: DigestFloor;
+  last_tick_at?: string;
+  last_digest_at?: string;
+  collectors: string[];
+  revoked: boolean;
+  vault?: string;
+};
+
+type Db = {
+  users: User[];
+  sessions: Session[];
+  projects: StoredProject[];
+};
+
+type DiskDb = {
+  users: User[];
+  sessions: Session[];
+  projects: DiskProject[];
+};
+
+const empty = (): Db => ({ users: [], sessions: [], projects: [] });
+
+function dbPath(): string {
+  return path.join(tingleDataDir(), "db.json");
+}
+
+async function readDb(): Promise<Db> {
+  try {
+    const raw = await fs.readFile(dbPath(), "utf8");
+    const parsed = JSON.parse(raw) as DiskDb;
+    const users = (parsed.users ?? []).map(ensureDek);
+    const sessions = parsed.sessions ?? [];
+    const dekByUser = new Map(users.map((u) => [u.id, unwrapDek(u.wrapped_dek)]));
+    const projects = (parsed.projects ?? []).map((row) => {
+      const dek = dekByUser.get(row.user_id);
+      return decodeProject(row, dek);
+    });
+    const db = { users, sessions, projects };
+    const dirty =
+      (parsed.users ?? []).some((u) => !u.wrapped_dek) ||
+      (parsed.projects ?? []).some((p) => !p.revoked && !p.vault);
+    if (dirty) await writeDb(db);
+    return db;
+  } catch {
+    return empty();
   }
+}
 
-  private async writeJson(file: string, value: unknown) {
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  }
-
-  private async readJson(file: string): Promise<unknown | null> {
-    try {
-      return JSON.parse(await readFile(file, "utf8"));
-    } catch {
-      return null;
+async function writeDb(db: Db): Promise<void> {
+  const file = dbPath();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const dekByUser = new Map<string, Buffer>();
+  for (const u of db.users) {
+    if (!u.wrapped_dek) {
+      const dek = newDek();
+      u.wrapped_dek = wrapDek(dek);
+      dekByUser.set(u.id, dek);
+    } else {
+      dekByUser.set(u.id, unwrapDek(u.wrapped_dek));
     }
   }
+  const disk: DiskDb = {
+    users: db.users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      password_hash: u.password_hash,
+      created_at: u.created_at,
+      wrapped_dek: u.wrapped_dek,
+    })),
+    sessions: db.sessions,
+    projects: db.projects.map((p) =>
+      encodeProject(p, dekByUser.get(p.user_id) ?? newDek()),
+    ),
+  };
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(disk, null, 2), "utf8");
+  await fs.rename(tmp, file);
+}
 
-  // ── users and sessions ───────────────────────────────────────────────────
+function ensureDek(user: User): User {
+  if (user.wrapped_dek) return user;
+  return { ...user, wrapped_dek: wrapDek(newDek()) };
+}
 
-  private usersFile() {
-    return path.join(this.rootDir, "users.json");
+function encodeProject(p: StoredProject, dek: Buffer): DiskProject {
+  const clear: DiskProject = {
+    id: p.id,
+    user_id: p.user_id,
+    created_at: p.created_at,
+    budget: p.budget,
+    tingle_on: p.tingle_on,
+    paused: p.paused,
+    paused_reason: p.paused_reason,
+    alert_email: p.alert_email,
+    digest_floor: p.digest_floor,
+    last_tick_at: p.last_tick_at,
+    last_digest_at: p.last_digest_at,
+    collectors: p.collectors ?? [],
+    revoked: Boolean(p.revoked),
+  };
+  if (p.revoked) return clear;
+  const secrets: ProjectSecrets = {
+    stage: p.stage,
+    extra_question: p.extra_question,
+    pitch: p.pitch,
+    docs_text: p.docs_text,
+    links: p.links,
+    github_url: p.github_url,
+    watch_list: p.watch_list,
+    patent_number: p.patent_number,
+    ignore: p.ignore,
+    claim: p.claim,
+    claim_confirmed: p.claim_confirmed,
+    claim_locked: p.claim_locked,
+    draft_claim: p.draft_claim,
+    profile: p.profile,
+    last_look: p.last_look,
+    messages: p.messages,
+    events: p.events,
+    mail: p.mail,
+    stealth: p.stealth,
+  };
+  return { ...clear, vault: seal(dek, secrets) };
+}
+
+function decodeProject(raw: DiskProject & Partial<StoredProject>, dek?: Buffer): StoredProject {
+  const base = {
+    id: raw.id,
+    user_id: raw.user_id,
+    created_at: raw.created_at,
+    budget: normalizeBudget(raw.budget),
+    tingle_on: Boolean(raw.tingle_on),
+    paused: Boolean(raw.paused),
+    paused_reason: raw.paused_reason,
+    alert_email: raw.alert_email,
+    digest_floor: raw.digest_floor === "weekly" ? "weekly" as const : "daily" as const,
+    last_tick_at: raw.last_tick_at,
+    last_digest_at: raw.last_digest_at,
+    collectors: raw.collectors ?? [],
+    revoked: Boolean(raw.revoked),
+  };
+  if (raw.revoked) {
+    return normalizeProject({
+      ...base,
+      stage: "starting",
+      claim: "",
+      claim_confirmed: false,
+      claim_locked: false,
+      links: [],
+      watch_list: [],
+      ignore: [],
+      messages: [],
+      events: [],
+      mail: [],
+      stealth: false,
+    });
   }
-  private sessionsFile() {
-    return path.join(this.rootDir, "sessions.json");
+  if (typeof raw.vault === "string" && dek) {
+    const secrets = open<ProjectSecrets>(dek, raw.vault);
+    return normalizeProject({ ...base, ...secrets });
   }
+  return normalizeProject(raw as StoredProject);
+}
 
-  async listUsers(): Promise<User[]> {
-    const raw = (await this.readJson(this.usersFile())) ?? [];
-    return z.array(UserSchema).safeParse(raw).data ?? [];
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const buf = (await scrypt(password, salt, 32)) as Buffer;
+  return `${salt}:${buf.toString("hex")}`;
+}
+
+export async function verifyPassword(
+  password: string,
+  stored: string,
+): Promise<boolean> {
+  const [salt, hex] = stored.split(":");
+  if (!salt || !hex) return false;
+  const buf = (await scrypt(password, salt, 32)) as Buffer;
+  const a = Buffer.from(hex, "hex");
+  if (a.length !== buf.length) return false;
+  return timingSafeEqual(a, buf);
+}
+
+export async function createUser(email: string, password: string): Promise<User> {
+  const db = await readDb();
+  const norm = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(norm)) {
+    throw new Error("invalid email");
   }
+  if (password.length < 8) throw new Error("password must be at least 8 characters");
+  if (db.users.some((u) => u.email === norm)) throw new Error("email already registered");
+  const user: User = {
+    id: randomUUID(),
+    email: norm,
+    password_hash: await hashPassword(password),
+    created_at: new Date().toISOString(),
+    wrapped_dek: wrapDek(newDek()),
+  };
+  db.users.push(user);
+  await writeDb(db);
+  return user;
+}
 
-  async findUserByEmail(email: string): Promise<User | null> {
-    const target = email.trim().toLowerCase();
-    return (await this.listUsers()).find((u) => u.email === target) ?? null;
-  }
+export async function loginUser(
+  email: string,
+  password: string,
+): Promise<User | undefined> {
+  const db = await readDb();
+  const user = db.users.find((u) => u.email === email.trim().toLowerCase());
+  if (!user) return undefined;
+  if (!(await verifyPassword(password, user.password_hash))) return undefined;
+  return user;
+}
 
-  async findUserById(id: string): Promise<User | null> {
-    return (await this.listUsers()).find((u) => u.id === id) ?? null;
-  }
+export async function createSession(userId: string): Promise<Session> {
+  const db = await readDb();
+  const session: Session = {
+    id: randomBytes(24).toString("hex"),
+    user_id: userId,
+    expires_at: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+  };
+  db.sessions.push(session);
+  await writeDb(db);
+  return session;
+}
 
-  async addUser(user: User): Promise<void> {
-    const users = await this.listUsers();
-    if (users.some((u) => u.email === user.email)) {
-      throw new Error("an account with that email already exists");
-    }
-    await this.writeJson(this.usersFile(), [...users, user]);
-  }
+export async function destroySession(sessionId: string): Promise<void> {
+  const db = await readDb();
+  db.sessions = db.sessions.filter((s) => s.id !== sessionId);
+  await writeDb(db);
+}
 
-  async addSession(session: Session): Promise<void> {
-    const all = z
-      .array(SessionSchema)
-      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
-    // Drop expired rows on write, so the file does not grow forever.
-    const live = all.filter((s) => sessionValid(s));
-    await this.writeJson(this.sessionsFile(), [...live, session]);
-  }
+export async function userFromSession(
+  sessionId: string | undefined,
+): Promise<User | undefined> {
+  if (!sessionId) return undefined;
+  const db = await readDb();
+  const session = db.sessions.find((s) => s.id === sessionId);
+  if (!session) return undefined;
+  if (Date.parse(session.expires_at) < Date.now()) return undefined;
+  return db.users.find((u) => u.id === session.user_id);
+}
 
-  async findSession(token: string): Promise<Session | null> {
-    const all = z
-      .array(SessionSchema)
-      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
-    const found = all.find((s) => s.token === token);
-    return found && sessionValid(found) ? found : null;
-  }
+export async function listProjects(userId: string): Promise<StoredProject[]> {
+  const db = await readDb();
+  return db.projects.filter((p) => p.user_id === userId);
+}
 
-  async removeSession(token: string): Promise<void> {
-    const all = z
-      .array(SessionSchema)
-      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
-    await this.writeJson(
-      this.sessionsFile(),
-      all.filter((s) => s.token !== token && sessionValid(s)),
-    );
-  }
+export async function getProject(
+  userId: string,
+  projectId: string,
+): Promise<StoredProject | undefined> {
+  const db = await readDb();
+  const p = db.projects.find((x) => x.id === projectId);
+  if (!p || p.user_id !== userId) return undefined;
+  return p;
+}
 
-  // ── projects ─────────────────────────────────────────────────────────────
+export async function saveProject(project: StoredProject): Promise<void> {
+  const db = await readDb();
+  const i = db.projects.findIndex((p) => p.id === project.id);
+  if (i === -1) db.projects.push(project);
+  else db.projects[i] = project;
+  await writeDb(db);
+}
 
-  /** Which projects belong to a user. Kept as an index so listing is cheap. */
-  private ownerFile() {
-    return path.join(this.rootDir, "project-owners.json");
-  }
+export async function revokeProject(
+  userId: string,
+  projectId: string,
+): Promise<StoredProject | undefined> {
+  const db = await readDb();
+  const p = db.projects.find((x) => x.id === projectId && x.user_id === userId);
+  if (!p) return undefined;
+  const stub: StoredProject = {
+    ...p,
+    revoked: true,
+    tingle_on: false,
+    paused: true,
+    paused_reason: "revoked",
+    stage: "starting",
+    extra_question: undefined,
+    pitch: undefined,
+    docs_text: undefined,
+    links: [],
+    github_url: undefined,
+    watch_list: [],
+    patent_number: undefined,
+    ignore: [],
+    claim: "",
+    claim_confirmed: false,
+    claim_locked: false,
+    profile: undefined,
+    last_look: undefined,
+    messages: [],
+    events: [],
+    mail: [],
+    stealth: false,
+    alert_email: undefined,
+  };
+  const i = db.projects.findIndex((x) => x.id === p.id);
+  db.projects[i] = stub;
+  await writeDb(db);
+  return stub;
+}
 
-  async claimProject(userId: string, projectId: string): Promise<void> {
-    const map = (await this.readJson(this.ownerFile())) as Record<
-      string,
-      string
-    > | null;
-    const next = { ...(map ?? {}), [projectId]: userId };
-    await this.writeJson(this.ownerFile(), next);
-  }
-
-  async listProjects(userId: string): Promise<WatchProfile[]> {
-    const map =
-      ((await this.readJson(this.ownerFile())) as Record<string, string>) ?? {};
-    const ids = Object.entries(map)
-      .filter(([, owner]) => owner === userId)
-      .map(([id]) => id);
-    const out: WatchProfile[] = [];
-    for (const id of ids) {
-      const p = await this.loadProfile(id);
-      if (p) out.push(p);
-    }
-    return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }
-
-  async ownsProject(userId: string, projectId: string): Promise<boolean> {
-    const map =
-      ((await this.readJson(this.ownerFile())) as Record<string, string>) ?? {};
-    return map[projectId] === userId;
-  }
-
-  /** Last first-look result, so the project page and analyst have something to read. */
-  async saveLastLook(projectId: string, payload: unknown): Promise<void> {
-    await this.writeJson(
-      path.join(this.dir(projectId), "last-look.json"),
-      payload,
-    );
-  }
-
-  async loadLastLook(projectId: string): Promise<any | null> {
-    return this.readJson(path.join(this.dir(projectId), "last-look.json"));
-  }
-
-  async saveProfile(profile: WatchProfile): Promise<void> {
-    await this.writeJson(
-      path.join(this.dir(profile.project_id), "profile.json"),
-      profile,
-    );
-  }
-
-  async loadProfile(projectId: string): Promise<WatchProfile | null> {
-    const raw = await this.readJson(
-      path.join(this.dir(projectId), "profile.json"),
-    );
-    if (!raw) return null;
-    const parsed = WatchProfileSchema.safeParse(raw);
-    return parsed.success ? parsed.data : null;
-  }
-
-  async loadBaseline(projectId: string): Promise<Baseline | null> {
-    const raw = await this.readJson(
-      path.join(this.dir(projectId), "baseline.json"),
-    );
-    if (!raw) return null;
-    const parsed = BaselineSchema.safeParse(raw);
-    return parsed.success ? parsed.data : null;
-  }
-
-  /**
-   * Write the baseline after a successful first look.
-   *
-   * Append-only on `first_seen`: a row already in the baseline keeps its
-   * original timestamp, so "when did this appear" survives later runs. Content
-   * hashes are updated in place, because that is how a changed page is
-   * detected without losing the discovery date.
-   */
-  async saveBaseline(
-    projectId: string,
-    claimLock: string,
-    entries: Array<{ id: string; url: string; origin: string; content_hash: string }>,
-  ): Promise<Baseline> {
-    const now = new Date().toISOString();
-    const existing = await this.loadBaseline(projectId);
-    const byId = new Map(
-      (existing?.claim_lock === claimLock ? existing.entries : []).map((e) => [
-        e.id,
-        e,
-      ]),
-    );
-
-    for (const e of entries) {
-      const prior = byId.get(e.id);
-      byId.set(e.id, {
-        ...e,
-        first_seen: prior?.first_seen ?? now,
-      });
-    }
-
-    const baseline: Baseline = {
-      project_id: projectId,
-      claim_lock: claimLock,
-      created_at: existing?.created_at ?? now,
-      updated_at: now,
-      entries: [...byId.values()],
+export function publicProject(p: StoredProject) {
+  if (p.revoked) {
+    return {
+      id: p.id,
+      created_at: p.created_at,
+      revoked: true,
+      budget: p.budget,
+      collectors: p.collectors,
+      tingle_on: false,
+      paused: true,
+      claim: "",
+      claim_confirmed: false,
+      events: [],
+      messages: [],
+      vault_promise: VAULT_PROMISE,
     };
-    await this.writeJson(
-      path.join(this.dir(projectId), "baseline.json"),
-      baseline,
-    );
-    return baseline;
   }
+  return {
+    id: p.id,
+    created_at: p.created_at,
+    stage: p.stage,
+    extra_question: p.extra_question,
+    claim: p.claim,
+    claim_confirmed: p.claim_confirmed,
+    claim_locked: p.claim_locked,
+    draft_claim: p.draft_claim,
+    ignore: p.ignore,
+    last_look: p.last_look,
+    messages: p.messages,
+    github_url: p.github_url,
+    tingle_on: p.tingle_on,
+    alert_email: p.alert_email,
+    digest_floor: p.digest_floor,
+    budget: p.budget,
+    paused: p.paused,
+    paused_reason: p.paused_reason,
+    pause_copy: p.paused ? PAUSE_COPY : undefined,
+    events: p.events,
+    last_tick_at: p.last_tick_at,
+    stealth: p.stealth,
+    collectors: p.collectors,
+    revoked: false,
+    vault_promise: VAULT_PROMISE,
+  };
+}
+
+export function newProjectFields(): Pick<
+  StoredProject,
+  | "tingle_on"
+  | "digest_floor"
+  | "budget"
+  | "paused"
+  | "events"
+  | "mail"
+  | "stealth"
+  | "collectors"
+  | "revoked"
+  | "claim_locked"
+> {
+  return {
+    tingle_on: false,
+    digest_floor: "daily",
+    budget: { ...DEFAULT_BUDGET },
+    paused: false,
+    events: [],
+    mail: [],
+    stealth: false,
+    collectors: [],
+    revoked: false,
+    claim_locked: false,
+  };
+}
+
+export async function listWatchingProjects(): Promise<StoredProject[]> {
+  const db = await readDb();
+  return db.projects.filter(
+    (p) => p.tingle_on && p.claim_confirmed && !p.paused && !p.revoked,
+  );
+}
+
+export function dbFilePath(): string {
+  return dbPath();
+}
+
+function normalizeProject(p: StoredProject): StoredProject {
+  return {
+    ...p,
+    tingle_on: Boolean(p.tingle_on),
+    digest_floor: p.digest_floor === "weekly" ? "weekly" : "daily",
+    budget: normalizeBudget(p.budget),
+    paused: Boolean(p.paused),
+    events: p.events ?? [],
+    mail: p.mail ?? [],
+    ignore: p.ignore ?? [],
+    links: p.links ?? [],
+    watch_list: p.watch_list ?? [],
+    messages: p.messages ?? [],
+    stealth: Boolean(p.stealth),
+    collectors: p.collectors ?? [],
+    revoked: Boolean(p.revoked),
+    claim: p.claim ?? "",
+    claim_locked: Boolean(p.claim_locked),
+  };
 }

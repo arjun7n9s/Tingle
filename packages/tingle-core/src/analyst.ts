@@ -1,172 +1,99 @@
-import type { ScoredHit } from "./piles.js";
-import { normalizeText } from "./claim.js";
+import type { FirstLookResult } from "./jobs/firstLook.js";
+import type { PileHit } from "./piles.js";
 
-export type AnalystContext = {
-  claim: string;
-  hits: ScoredHit[];
-  /** Every lane that ran this turn, and whether it came back. */
-  sources: Array<{ name: string; kind: string; ok: boolean; rows: number; error?: string }>;
-};
+export const ANALYST_REFUSAL =
+  "I don't have a tool for that. I only report what the scrapers returned for this project. I do not invent products, papers, or patents, and I do not score markets.";
 
-export type AnalystAnswer = {
-  /** Which tool answered. `null` means nothing did, and we say so. */
-  tool: string | null;
-  text: string;
-  rows: ScoredHit[];
-  /** Always shown as a collapsible footer, never as a chat reply. */
-  sources_used: string[];
-};
-
-export const ANALYST_CONTRACT =
-  "I only report what the scrapers returned for this project. I do not invent " +
-  "products, papers, or patents. If a source did not come back, I will say it " +
-  "did not come back.";
-
-type Tool = {
-  name: string;
-  /** Matched against the normalised question. */
-  matches: RegExp;
-  run: (ctx: AnalystContext, q: string) => { text: string; rows: ScoredHit[] };
-};
-
-const TOOLS: Tool[] = [
-  {
-    name: "filter_by_source",
-    matches:
-      /\b(what did|show( me)?|list)\b.*\b(search|watch|chaos|hacker ?news|hn|arxiv|github|adjunct)\b|\b(search|watch|hn|arxiv|github)\b.*\b(return|find|show)\b/,
-    run: (ctx, q) => {
-      const wanted = matchOrigin(q);
-      if (!wanted) {
-        return { text: "I could not tell which source you meant.", rows: [] };
-      }
-      const rows = ctx.hits.filter((h) => h.origin.includes(wanted.key));
-      const src = ctx.sources.find((s) => s.name.includes(wanted.key));
-      if (src && !src.ok) {
-        return {
-          text: `${wanted.label} did not come back this run — ${
-            src.error ?? "no reason reported"
-          }. I have nothing from it to show you.`,
-          rows: [],
-        };
-      }
-      if (!rows.length) {
-        return {
-          text: `${wanted.label} returned rows, but none of them cleared the relevance threshold for this claim, so none are in the piles.`,
-          rows: [],
-        };
-      }
-      return {
-        text: `${rows.length} hit(s) from ${wanted.label}.`,
-        rows,
-      };
-    },
-  },
-  {
-    name: "filter_recent",
-    matches: /\b(recent|latest|new|last (7|seven) days|this week|just shipped)\b/,
-    run: (ctx) => {
-      const rows = ctx.hits.filter((h) => h.published_iso);
-      rows.sort(
-        (a, b) =>
-          new Date(b.published_iso!).getTime() - new Date(a.published_iso!).getTime(),
-      );
-      if (!rows.length) {
-        return {
-          text: "None of the rows I have carry a date I could read, so I cannot order them by recency.",
-          rows: [],
-        };
-      }
-      return { text: `${rows.length} dated hit(s), newest first.`, rows: rows.slice(0, 10) };
-    },
-  },
-  {
-    name: "explain_hit",
-    matches: /\bwhy\b.*\b(here|this|included|match)/,
-    run: (ctx) => {
-      const rows = [...ctx.hits].sort((a, b) => b.score - a.score).slice(0, 5);
-      if (!rows.length) return { text: "There are no hits to explain.", rows: [] };
-      const lines = rows.map(
-        (h) => `· ${h.title} — ${h.reason} (score ${h.score})`,
-      );
-      return {
-        text: `Each hit is here because it matched the claim's fingerprints:\n${lines.join(
-          "\n",
-        )}`,
-        rows,
-      };
-    },
-  },
-  {
-    name: "source_health",
-    matches:
-      /\b(which|what)\b.*\b(sources?|collectors?|lanes?)\b|\b(sources?|collectors?)\b.*\b(ran|used|fail|work)/,
-    run: (ctx) => {
-      const lines = ctx.sources.map(
-        (s) =>
-          `· ${s.name} — ${
-            s.ok ? `${s.rows} row(s)` : `did not come back: ${s.error ?? "unknown"}`
-          }`,
-      );
-      return { text: `Lanes this run:\n${lines.join("\n")}`, rows: [] };
-    },
-  },
-  {
-    name: "count_piles",
-    matches: /\b(how many|count|total)\b/,
-    run: (ctx) => ({
-      text: `${ctx.hits.length} hit(s) cleared the threshold for this claim.`,
-      rows: [],
-    }),
-  },
-];
-
-function matchOrigin(q: string): { key: string; label: string } | null {
-  if (/\bhacker ?news\b|\bhn\b/.test(q)) return { key: "hn", label: "Hacker News" };
-  if (/\barxiv\b/.test(q)) return { key: "arxiv", label: "arXiv" };
-  if (/\bgithub\b/.test(q)) return { key: "github", label: "the repo lane" };
-  if (/\bsearch\b/.test(q)) return { key: "search", label: "the search collector" };
-  if (/\bwatch\b/.test(q)) return { key: "watch", label: "the watch collector" };
-  if (/\bchaos\b/.test(q)) return { key: "chaos", label: "the chaos collector" };
-  return null;
+function allHits(look?: FirstLookResult): PileHit[] {
+  if (!look) return [];
+  return [
+    ...look.piles.stand_on_this,
+    ...look.piles.already_in_the_lane,
+    ...look.piles.shipped_last_7_days,
+  ];
 }
 
-/**
- * Answer a follow-up, or refuse.
- *
- * Every answer comes from a tool that reads stored rows. There is no model in
- * this path, so the analyst cannot produce a market forecast, a valuation, or a
- * competitor it did not scrape — not because it was told not to, but because
- * there is nothing here capable of inventing one. Questions no tool covers get
- * told exactly that.
- */
-export function askAnalyst(ctx: AnalystContext, question: string): AnalystAnswer {
-  const q = normalizeText(question);
-  const sources_used = ctx.sources.filter((s) => s.ok).map((s) => s.name);
+export function analystReply(
+  message: string,
+  look: FirstLookResult | undefined,
+): { text: string; covered: boolean } {
+  const q = message.toLowerCase();
+  const market =
+    /win the market|who will win|tam\b|total addressable|viability score|will (this|it) succeed/.test(
+      q,
+    );
+  if (market) return { text: ANALYST_REFUSAL, covered: false };
 
-  if (!q.trim()) {
+  if (!look) {
     return {
-      tool: null,
-      text: "Ask me something about what the collectors returned for this project.",
-      rows: [],
-      sources_used,
+      text: "No first look is on file yet. Confirm the claim and run first look.",
+      covered: true,
     };
   }
 
-  for (const tool of TOOLS) {
-    if (tool.matches.test(q)) {
-      const { text, rows } = tool.run(ctx, q);
-      return { tool: tool.name, text, rows, sources_used };
+  const hits = allHits(look);
+  const searchHits = hits.filter((h) => h.collector === "search");
+
+  if (/what did search return|search return|from search/.test(q)) {
+    if (!look.sources_used.includes("search")) {
+      return {
+        text: "Search did not come back for this project. That is a collector failure, not an empty niche.",
+        covered: true,
+      };
     }
+    if (!searchHits.length) {
+      return {
+        text: `Search returned, but none of the listing rows matched the claim after ranking. Scraped hits were dropped for precision. quality: scraped=${look.quality.hits_scraped} matched=${look.quality.hits_matched}.`,
+        covered: true,
+      };
+    }
+    const lines = searchHits
+      .slice(0, 12)
+      .map((h) => `- ${h.title} (${h.url})`)
+      .join("\n");
+    return {
+      text: `Search returned ${searchHits.length} claim-matched row(s):\n${lines}`,
+      covered: true,
+    };
   }
 
-  return {
-    tool: null,
-    text:
-      "No tool I have covers that. I can only report what the collectors " +
-      "returned for this project — which lanes ran, what they returned, how " +
-      "recent it is, and why a hit matched the claim. I will not guess at " +
-      "market size, valuations, or who wins.",
-    rows: [],
-    sources_used,
-  };
+  if (/github/.test(q)) {
+    const gh = hits.filter((h) => /github\.com/i.test(h.url) || h.collector === "github_rest");
+    if (!gh.length) {
+      return {
+        text: "No GitHub rows are in the first-look JSON. I will not invent a repo.",
+        covered: true,
+      };
+    }
+    return {
+      text: gh.map((h) => `- ${h.title} (${h.url})`).join("\n"),
+      covered: true,
+    };
+  }
+
+  if (/mute|ignore/.test(q)) {
+    return {
+      text: "Use Mute on a hit to add it to ignore[]. I do not mute from a free-text guess.",
+      covered: true,
+    };
+  }
+
+  if (/source/.test(q)) {
+    const used = look.sources_used.join(", ") || "none";
+    const failed = look.collectors_failed.join("; ") || "none";
+    return {
+      text: `Sources used: ${used}. Collectors failed: ${failed}.`,
+      covered: true,
+    };
+  }
+
+  const summary = [
+    look.analyst_contract,
+    `Claim: ${look.claim}`,
+    `Stand on this: ${look.piles.stand_on_this.length}. Already in the lane: ${look.piles.already_in_the_lane.length}. Shipped in the last 7 days: ${look.piles.shipped_last_7_days.length}.`,
+    look.quality.hits_matched === 0
+      ? `Collectors ran (${look.sources_used.join(", ") || "none"}); nothing matched the claim closely enough to show. Empty piles are not an empty niche invented by me.`
+      : `Matched ${look.quality.hits_matched} of ${look.quality.hits_scraped} scraped rows.`,
+  ].join("\n");
+  return { text: summary, covered: true };
 }
