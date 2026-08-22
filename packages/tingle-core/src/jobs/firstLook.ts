@@ -1,293 +1,252 @@
 import { randomUUID } from "node:crypto";
-import {
-  fetchArxiv,
-  fetchGithubRepo,
-  fetchHackerNews,
-  fetchUspto,
-  type AdjunctResult,
-} from "../adjuncts.js";
+import { fetchAdjuncts } from "../adjunct.js";
 import { BrightDataClient } from "../bd/client.js";
 import { scrapeAndValidate } from "../bd/scrape.js";
+import { proposeClaim } from "../claim.js";
 import {
-  buildFingerprints,
-  claimLock,
-  keywordQuery,
-  phraseQuery,
-  proposeClaim,
-} from "../claim.js";
-import { planCollectors } from "../collectors.js";
-import type { TingleConfig } from "../config.js";
-import { buildPiles, enrichHit, type EnrichedHit, type PileResult } from "../piles.js";
+  loadTingleConfig,
+  type TingleConfig,
+} from "../config.js";
+import { saveBaseline } from "./baseline.js";
+import {
+  mapHitsToPiles,
+  pileCounts,
+  type PileableHit,
+  type Piles,
+} from "../piles.js";
 import type { HealEvent } from "../schema/events.js";
 import {
-  ProjectInputSchema,
+  FirstLookTogglesSchema,
+  StageSchema,
   WatchProfileSchema,
-  type ProjectInput,
+  type Stage,
   type WatchProfile,
 } from "../schema/profile.js";
-import type { ProjectStore } from "../store.js";
 
 export type FirstLookRequest = {
   project_id?: string;
-  input: ProjectInput;
-  /** The sentence the builder confirmed. Required to spend anything. */
-  claim?: string;
-  /**
-   * Explicit go-ahead. Without it the job returns a proposed claim and stops.
-   * Credits are never spent on a sentence nobody agreed to.
-   */
+  stage?: Stage;
+  extra_question?: string;
   confirmed?: boolean;
-  must_match?: string[];
-  now?: Date;
-  /**
-   * Write the profile and baseline. Quick chat sets this false: it is a
-   * throwaway look with no memory, and leaving a profile and baseline on disk
-   * would make it a project in everything but name.
-   */
-  persist?: boolean;
+  claim?: string;
+  pitch?: string;
+  docs_text?: string;
+  links?: string[];
+  github_url?: string;
+  watch_list?: string[];
+  patent_number?: string;
+  ignore?: string[];
+  auto_approve_heal?: boolean;
+  lanes?: Array<"search" | "watch">;
+  include_adjuncts?: boolean;
+  stealth?: boolean;
 };
 
-export type SourceReport = {
-  name: string;
-  kind: "collector" | "adjunct";
-  ok: boolean;
-  rows: number;
-  error?: string;
-  /** True when an owned collector proposed a repair and is awaiting review. */
-  awaiting_approval?: boolean;
+export type FirstLookNeedsConfirm = {
+  status: "needs_confirm";
+  proposed_claim: string;
+  fingerprints: string[];
+  must_match: string[];
 };
 
-export type FirstLookResponse =
-  | {
-      status: "needs_confirmation";
-      proposed_claim: string;
-      fingerprints: string[];
-      /** Nothing was scraped and nothing was charged. */
-      spent: { collector_runs: 0 };
-      message: string;
-    }
-  | {
-      status: "ok";
-      project_id: string;
-      claim: string;
-      claim_lock: string;
-      stage: ProjectInput["stage"];
-      piles: PileResult["piles"];
-      pile_counts: Record<string, number>;
-      filtered: PileResult["filtered"];
-      sources_used: string[];
-      collectors_failed: SourceReport[];
-      sources: SourceReport[];
-      quality: PileResult["quality"] & {
-        collectors_ok: number;
-        collectors_total: number;
-        adjuncts_ok: number;
-        adjuncts_total: number;
-      };
-      heal_events: HealEvent[];
-      baseline_size: number;
-      spent: { collector_runs: number };
-      profile: WatchProfile;
+export type FirstLookResult = {
+  status: "ok";
+  claim: string;
+  fingerprints: string[];
+  profile: WatchProfile;
+  piles: Piles;
+  sources_used: string[];
+  collectors_failed: string[];
+    quality: {
+      hit_count_per_pile: Record<string, number>;
+      collectors_returned: string[];
+      zod_failures: string[];
+      empty_shipped_pile: boolean;
+      hits_scraped: number;
+      hits_matched: number;
     };
+  baseline: {
+    project_id: string;
+    at: string;
+    hit_ids: string[];
+    urls: string[];
+    content_hashes: string[];
+  };
+  heal_events: HealEvent[];
+  analyst_contract: string;
+};
 
-/**
- * Claim in, three piles out. No UI, no chat, no model.
- *
- * The piles are a pure function of collector rows plus the claim's
- * fingerprints, so a hit that was not in the JSON cannot appear in a pile.
- * That is a property of the code path, not a instruction someone has to follow.
- */
-export async function runFirstLook(
-  config: TingleConfig,
-  store: ProjectStore,
-  req: FirstLookRequest,
-): Promise<FirstLookResponse> {
-  const now = req.now ?? new Date();
-  const input = ProjectInputSchema.parse(req.input);
+export const ANALYST_CONTRACT =
+  "I only report what the scrapers returned for this project. I do not invent products, papers, or patents. If a source did not come back, I will say it did not come back.";
 
-  // ── claim gate ───────────────────────────────────────────────────────────
-  const claim = (req.claim ?? "").trim() || proposeClaim(input);
-  if (!claim) {
+export function parseFirstLookRequest(raw: unknown): FirstLookRequest {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const toggles = FirstLookTogglesSchema.parse({
+    pitch: r.pitch,
+    docs_text: r.docs_text,
+    links: r.links,
+    github_url: r.github_url,
+    watch_list: r.watch_list,
+    patent_number: r.patent_number,
+    ignore: r.ignore,
+  });
+  const stage = r.stage
+    ? StageSchema.parse(r.stage)
+    : undefined;
+  const hasInput = Boolean(
+    toggles.pitch ||
+      toggles.docs_text ||
+      (toggles.links && toggles.links.length) ||
+      toggles.github_url ||
+      toggles.patent_number ||
+      r.claim,
+  );
+  if (!hasInput) {
     throw new Error(
-      "nothing to build a claim from — supply a pitch, a doc, a link, a repo, or a patent number",
+      "first look needs at least one toggle: pitch, docs_text, links, github_url, patent_number, or claim",
     );
   }
-  const artifactText = [
-    ...input.docs.map((d) => d.text),
-    ...input.watch_list,
-  ];
-  const fp = buildFingerprints(claim, artifactText);
+  return {
+    project_id: typeof r.project_id === "string" ? r.project_id : undefined,
+    stage,
+    extra_question:
+      typeof r.extra_question === "string" ? r.extra_question : undefined,
+    confirmed: Boolean(r.confirmed),
+    claim: typeof r.claim === "string" ? r.claim : undefined,
+    auto_approve_heal: Boolean(r.auto_approve_heal),
+    lanes: Array.isArray(r.lanes)
+      ? (r.lanes.filter((x) => x === "search" || x === "watch") as Array<
+          "search" | "watch"
+        >)
+      : undefined,
+    include_adjuncts: r.include_adjuncts === false ? false : undefined,
+    stealth: Boolean(r.stealth),
+    ...toggles,
+  };
+}
 
+export async function firstLook(
+  req: FirstLookRequest,
+  deps: {
+    config?: TingleConfig;
+    client?: BrightDataClient;
+  } = {},
+): Promise<FirstLookNeedsConfirm | FirstLookResult> {
+  const config = deps.config ?? loadTingleConfig();
+  const proposed = proposeClaim({
+    pitch: req.pitch,
+    docs_text: req.docs_text,
+    claim: req.claim,
+  });
+  if (!proposed.claim) {
+    throw new Error("could not derive a claim sentence from the inputs");
+  }
   if (!req.confirmed) {
     return {
-      status: "needs_confirmation",
-      proposed_claim: claim,
-      fingerprints: fp.fingerprints.slice(0, 20),
-      spent: { collector_runs: 0 },
-      message:
-        "Edit this into one sentence you would want watched, then send it back with confirmed: true. Nothing has been scraped and nothing has been charged.",
+      status: "needs_confirm",
+      proposed_claim: proposed.claim,
+      fingerprints: proposed.fingerprints,
+      must_match: proposed.must_match,
     };
   }
 
-  const project_id = req.project_id ?? randomUUID();
-  const lock = claimLock(claim);
-
-  // ── owned collectors ─────────────────────────────────────────────────────
-  const sources: SourceReport[] = [];
-  const healEvents: HealEvent[] = [];
-  const hits: EnrichedHit[] = [];
-  let collectorRuns = 0;
-
-  const client = new BrightDataClient(config);
-  const { plans, skipped } = planCollectors(config, {
-    claim,
-    only: ["search", "watch"],
-  });
-
-  for (const s of skipped) {
-    sources.push({
-      name: s.key,
-      kind: "collector",
-      ok: false,
-      rows: 0,
-      error: s.reason,
-    });
-  }
-
-  for (const plan of plans) {
-    collectorRuns += 1;
-    const outcome = await scrapeAndValidate(client, {
-      collectorId: plan.collectorId,
-      source: plan.source,
-      inputs: plan.inputs,
-      // Never auto-approve inside a user-facing job. A repair that reshapes
-      // the schema gets looked at by a person first.
-      autoApprove: false,
-      onHealEvent: (e) => healEvents.push(e),
-    });
-    for (const row of outcome.hits) {
-      hits.push(enrichHit(row, plan.key, now));
-    }
-    sources.push({
-      name: plan.key,
-      kind: "collector",
-      ok: outcome.hits.length > 0 && !outcome.error,
-      rows: outcome.hits.length,
-      error: outcome.error,
-      awaiting_approval: outcome.awaitingApproval || undefined,
-    });
-  }
-
-  // ── adjuncts, clearly labelled, never the only path ──────────────────────
-  // Keyword APIs get distinctive terms, not the claim sentence — see
-  // keywordQuery. arXiv matches on an exact string, so it gets the best phrase.
-  const kw = keywordQuery(fp);
-  const phrase = phraseQuery(fp);
-  const adjunctCalls: Array<Promise<AdjunctResult>> = [
-    fetchHackerNews(kw),
-    fetchArxiv(phrase),
-    fetchUspto(kw, process.env.TINGLE_USPTO_API_KEY),
+  const fingerprints = [
+    ...proposed.fingerprints,
+    ...(req.watch_list ?? []).map((w) => w.toLowerCase()),
   ];
-  if (input.github_repo) adjunctCalls.push(fetchGithubRepo(input.github_repo));
-
-  for (const result of await Promise.all(adjunctCalls)) {
-    for (const row of result.rows) {
-      hits.push(enrichHit(row, `adjunct:${result.name}`, now));
-    }
-    sources.push({
-      name: `adjunct:${result.name}`,
-      kind: "adjunct",
-      ok: result.ok,
-      rows: result.rows.length,
-      error: result.error,
-    });
-  }
-
-  // ── piles ────────────────────────────────────────────────────────────────
-  const result = buildPiles(hits, fp, {
-    now,
-    mustMatch: req.must_match ?? [],
-    ignore: input.ignore,
-  });
-
-  // ── persist ──────────────────────────────────────────────────────────────
-  const kept = [
-    ...result.piles.stand_on_this,
-    ...result.piles.already_in_the_lane,
-    ...result.piles.shipped_last_7_days,
-  ];
-  const persist = req.persist ?? true;
-  const entries = kept.map((h) => ({
-    id: h.id,
-    url: h.url,
-    origin: h.origin,
-    content_hash: h.content_hash,
-  }));
-  const baseline = persist
-    ? await store.saveBaseline(project_id, lock, entries)
-    : {
-        project_id,
-        claim_lock: lock,
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        entries: entries.map((e) => ({ ...e, first_seen: now.toISOString() })),
-      };
-
-  const existing = persist ? await store.loadProfile(project_id) : null;
+  const ignore = req.ignore ?? [];
+  const projectId = req.project_id ?? randomUUID();
   const profile = WatchProfileSchema.parse({
-    project_id,
-    stage: input.stage,
-    claim,
-    claim_lock: lock,
-    fingerprints: fp.fingerprints.slice(0, 40),
-    must_match: req.must_match ?? [],
-    ignore: input.ignore,
-    sources: sources.filter((s) => s.ok).map((s) => s.name),
-    baseline_ids: baseline.entries.map((e) => e.id),
-    geo: { country: input.country ?? config.searchCountry },
-    budget: {
-      cap_page_loads: existing?.budget.cap_page_loads ?? 500,
-      spent_page_loads: (existing?.budget.spent_page_loads ?? 0) + collectorRuns,
-      lane: existing?.budget.lane ?? "cheap",
-    },
-    alert_email: existing?.alert_email ?? null,
-    digest_floor: existing?.digest_floor ?? "weekly",
-    stealth: existing?.stealth ?? false,
-    storage: existing?.storage ?? "vault",
-    created_at: existing?.created_at ?? now.toISOString(),
-    updated_at: now.toISOString(),
+    project_id: projectId,
+    stage: req.stage ?? "starting",
+    extra_question: req.extra_question,
+    claim: proposed.claim,
+    fingerprints,
+    must_match: proposed.must_match,
+    ignore,
+    sources: ["search", "watch"],
+    github_url: req.github_url,
+    patent_number: req.patent_number,
+    links: req.links ?? [],
+    watch_list: req.watch_list ?? [],
+    stealth: Boolean(req.stealth),
   });
-  if (persist) await store.saveProfile(profile);
 
-  const collectors = sources.filter((s) => s.kind === "collector");
-  const adjuncts = sources.filter((s) => s.kind === "adjunct");
+  const client = deps.client ?? new BrightDataClient(config);
+  const healEvents: HealEvent[] = [];
+  const collectorsFailed: string[] = [];
+  const collectorsReturned: string[] = [];
+  const zodFailures: string[] = [];
+  const hits: PileableHit[] = [];
+
+  const scrapeOne = async (source: "search" | "watch") => {
+    const outcome = await scrapeAndValidate(client, config, source, {
+      autoApprove: req.auto_approve_heal,
+    });
+    healEvents.push(...outcome.healEvents);
+    if (!outcome.stored_as_success) {
+      collectorsFailed.push(
+        `${source}: ${outcome.error ?? "validation failed — not stored as success"}`,
+      );
+      if (outcome.error) zodFailures.push(`${source}: ${outcome.error}`);
+      return;
+    }
+    collectorsReturned.push(source);
+    hits.push(...outcome.rows);
+  };
+
+  await Promise.all(
+    (req.lanes?.length ? req.lanes : (["search", "watch"] as const)).map(scrapeOne),
+  );
+
+  const adjunct =
+    req.include_adjuncts === false
+      ? { rows: [], sources_used: [] as string[], collectors_failed: [] as string[] }
+      : await fetchAdjuncts(config, {
+          fingerprints,
+          githubUrl: req.github_url,
+          patentNumber: req.patent_number,
+        });
+  hits.push(...adjunct.rows);
+  collectorsFailed.push(...adjunct.collectors_failed);
+
+  const piles = mapHitsToPiles(hits, {
+    fingerprints,
+    must_match: proposed.must_match,
+    ignore,
+  });
+  const allPileHits = [
+    ...piles.stand_on_this,
+    ...piles.already_in_the_lane,
+    ...piles.shipped_last_7_days,
+  ];
+  const baseline = {
+    project_id: projectId,
+    at: new Date().toISOString(),
+    hit_ids: allPileHits.map((h) => h.id),
+    urls: allPileHits.map((h) => h.url),
+    content_hashes: allPileHits.map((h) => h.content_hash),
+  };
+  await saveBaseline(baseline);
 
   return {
     status: "ok",
-    project_id,
-    claim,
-    claim_lock: lock,
-    stage: input.stage,
-    piles: result.piles,
-    pile_counts: {
-      stand_on_this: result.piles.stand_on_this.length,
-      already_in_the_lane: result.piles.already_in_the_lane.length,
-      shipped_last_7_days: result.piles.shipped_last_7_days.length,
-    },
-    filtered: result.filtered,
-    sources_used: sources.filter((s) => s.ok).map((s) => s.name),
-    collectors_failed: collectors.filter((s) => !s.ok),
-    sources,
-    quality: {
-      ...result.quality,
-      collectors_ok: collectors.filter((s) => s.ok).length,
-      collectors_total: collectors.length,
-      adjuncts_ok: adjuncts.filter((s) => s.ok).length,
-      adjuncts_total: adjuncts.length,
-    },
-    heal_events: healEvents,
-    baseline_size: baseline.entries.length,
-    spent: { collector_runs: collectorRuns },
+    claim: proposed.claim,
+    fingerprints,
     profile,
+    piles,
+    sources_used: [...collectorsReturned, ...adjunct.sources_used],
+    collectors_failed: collectorsFailed,
+    quality: {
+      hit_count_per_pile: pileCounts(piles),
+      collectors_returned: collectorsReturned,
+      zod_failures: zodFailures,
+      empty_shipped_pile: piles.shipped_last_7_days.length === 0,
+      hits_scraped: hits.length,
+      hits_matched: allPileHits.length,
+    },
+    baseline,
+    heal_events: healEvents,
+    analyst_contract: ANALYST_CONTRACT,
   };
 }

@@ -1,270 +1,167 @@
 import { createHash } from "node:crypto";
-import { normalizeText, tokenize, type Fingerprints } from "./claim.js";
-import { isWithinDays, parseListingDate } from "./dates.js";
-import { domainFromUrl, type HitRow } from "./schema/hits.js";
+import { isClaimRelevant } from "./claim.js";
 
-export type EnrichedHit = HitRow & {
-  /** Stable across runs, so the second run is a diff and not a reprint. */
+export type PileableHit = {
+  source: string;
+  title: string;
+  url: string;
+  snippet: string;
+  published_at: string | null;
+  source_domain: string;
+};
+
+export const PILE_KEYS = [
+  "stand_on_this",
+  "already_in_the_lane",
+  "shipped_last_7_days",
+] as const;
+export type PileKey = (typeof PILE_KEYS)[number];
+
+export type PileHit = PileableHit & {
   id: string;
-  /** Which lane produced this row. */
-  origin: string;
-  /** Detects "this page changed" for the baseline. */
+  why: string;
+  collector: string;
   content_hash: string;
-  /** Normalised date, plus how confidently it was read. */
-  published_iso: string | null;
-  date_precision: "exact" | "inferred-year" | "unparsed";
+  entity_key: string;
+  days_old: number | null;
 };
 
-export type ScoredHit = EnrichedHit & {
-  score: number;
-  matched: string[];
-  /** Why it landed in its pile, in plain language. */
-  reason: string;
-  /** Set when a Stand-on-this row is also inside the recency window. */
-  also_recent?: boolean;
-};
+export type Piles = Record<PileKey, PileHit[]>;
 
-export type Piles = {
-  stand_on_this: ScoredHit[];
-  already_in_the_lane: ScoredHit[];
-  shipped_last_7_days: ScoredHit[];
-};
-
-export type PileResult = {
-  piles: Piles;
-  /** Everything excluded, and why. An unexplained drop is indistinguishable
-   *  from a scraper that never returned the row. */
-  filtered: Array<{ url: string; title: string; why: string }>;
-  quality: {
-    hits_in: number;
-    kept: number;
-    below_threshold: number;
-    ignored: number;
-    undated: number;
-  };
-};
-
-export function hitId(origin: string, url: string): string {
-  return createHash("sha256").update(`${origin}|${url}`).digest("hex").slice(0, 16);
-}
-
-export function contentHash(row: Pick<HitRow, "title" | "snippet">): string {
-  return createHash("sha256")
-    .update(`${normalizeText(row.title)}|${normalizeText(row.snippet)}`)
-    .digest("hex")
-    .slice(0, 16);
-}
-
-export function enrichHit(row: HitRow, origin: string, now: Date): EnrichedHit {
-  const parsed = parseListingDate(row.published_at, now);
-  return {
-    ...row,
-    id: hitId(origin, row.url),
-    origin,
-    content_hash: contentHash(row),
-    published_iso: parsed.iso,
-    date_precision: parsed.precision,
-  };
-}
-
-/**
- * Signals that a hit is something to build on rather than compete with.
- *
- * Tuned for precision over recall, per the spec: a wrong "stand on this" tells
- * someone to adopt a competitor, which is worse than omitting a real library.
- */
-const REUSABLE_HOSTS = new Set([
-  "arxiv.org","github.com","gitlab.com","codeberg.org","npmjs.com",
-  "pypi.org","crates.io","packagist.org","rubygems.org","huggingface.co",
-]);
-const REUSABLE_WORDS =
-  /\b(library|framework|sdk|open[-\s]?source|package|toolkit|boilerplate|starter|preprint|paper|specification|rfc)\b/i;
-
-function looksReusable(hit: EnrichedHit): boolean {
-  const host = domainFromUrl(hit.url);
-  if (REUSABLE_HOSTS.has(host)) return true;
-  if (/(^|\.)docs\./.test(host)) return true;
-  if (/\/(docs|documentation)(\/|$)/.test(hit.url)) return true;
-  if (/\/abs\//.test(hit.url)) return true;
-  return REUSABLE_WORDS.test(`${hit.title} ${hit.snippet}`);
-}
-
-/**
- * Score a hit against the claim's fingerprints.
- *
- * Two-word phrases are worth far more than single terms — "refund rate" places
- * something in a niche where "rate" on its own places nothing. A hit needs a
- * phrase, or several distinct terms, to clear the threshold.
- */
-export function scoreHit(
-  hit: Pick<HitRow, "title" | "snippet">,
-  fp: Fingerprints,
-): { score: number; matched: string[] } {
-  const haystack = normalizeText(`${hit.title} ${hit.snippet}`);
-  const tokens = new Set(tokenize(`${hit.title} ${hit.snippet}`));
-  const matched: string[] = [];
-  let score = 0;
-
-  for (const phrase of fp.phrases) {
-    if (haystack.includes(phrase)) {
-      score += 3;
-      matched.push(phrase);
-    }
-  }
-  for (const term of fp.terms) {
-    if (tokens.has(term)) {
-      score += 1;
-      matched.push(term);
-    }
-  }
-  return { score, matched };
-}
-
-export type PileOptions = {
-  now?: Date;
-  /** Minimum score to appear at all. One phrase, or two distinct terms. */
-  minScore?: number;
-  recencyDays?: number;
-  mustMatch?: string[];
+export type PileInput = {
+  fingerprints: string[];
+  must_match?: string[];
   ignore?: string[];
+  now?: Date;
 };
 
-function isIgnored(hit: EnrichedHit, ignore: string[]): string | null {
-  const host = domainFromUrl(hit.url);
-  const url = hit.url.toLowerCase();
-  const title = normalizeText(hit.title);
-  for (const raw of ignore) {
-    const needle = raw.trim().toLowerCase();
-    if (!needle) continue;
-    if (host === needle || host.endsWith(`.${needle}`)) return raw;
-    if (url.includes(needle)) return raw;
-    if (title.includes(normalizeText(needle))) return raw;
-  }
-  return null;
+const STAND_HOSTS = new Set([
+  "arxiv.org",
+  "export.arxiv.org",
+  "github.com",
+  "gitlab.com",
+  "npmjs.com",
+  "pypi.org",
+  "crates.io",
+  "docs.rs",
+  "readthedocs.io",
+  "patents.google.com",
+  "patentsview.org",
+  "uspto.gov",
+  "developer.uspto.gov",
+]);
+
+const STAND_TITLE =
+  /\b(library|sdk|api|framework|docs?|documentation|paper|preprint|dataset|toolkit|engine|parser|package)\b/i;
+
+export function hitId(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+}
+
+export function contentHash(hit: Pick<PileableHit, "title" | "url" | "snippet">): string {
+  return createHash("sha256")
+    .update(`${hit.url}\n${hit.title}\n${hit.snippet}`)
+    .digest("hex");
+}
+
+export function entityKey(hit: Pick<PileableHit, "title" | "url">): string {
+  const host = (() => {
+    try {
+      return new URL(hit.url).hostname.replace(/^www\./, "");
+    } catch {
+      return hit.url;
+    }
+  })();
+  const name = hit.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return `${host}::${name}`;
+}
+
+export function daysSince(publishedAt: string | null, now: Date): number | null {
+  if (!publishedAt) return null;
+  const t = Date.parse(publishedAt);
+  if (Number.isNaN(t)) return null;
+  return (now.getTime() - t) / 86_400_000;
+}
+
+function isStandOn(hit: PileableHit): boolean {
+  if (STAND_HOSTS.has(hit.source_domain.replace(/^www\./, ""))) return true;
+  if (hit.source === "search" && /github\.com/i.test(hit.url)) return true;
+  return STAND_TITLE.test(`${hit.title} ${hit.snippet}`);
 }
 
 /**
- * Sort hits into the three piles.
- *
- * No model runs here. The piles are a pure function of collector output plus
- * the claim's fingerprints, which is why nothing can appear in a pile that was
- * not in the JSON — it is structurally impossible rather than a promise.
+ * Map validated hits into the three piles. Search/Watch listings are ranked
+ * against the claim here — we do not interpolate `{q}` into the collector.
+ * Empty piles are allowed; they are not filled from model memory.
  */
-export function buildPiles(
-  hits: EnrichedHit[],
-  fp: Fingerprints,
-  opts: PileOptions = {},
-): PileResult {
-  const now = opts.now ?? new Date();
-  const minScore = opts.minScore ?? 3;
-  const recencyDays = opts.recencyDays ?? 7;
-  const mustMatch = (opts.mustMatch ?? []).map((m) => normalizeText(m)).filter(Boolean);
-  const ignore = opts.ignore ?? [];
-
+export function mapHitsToPiles(
+  hits: PileableHit[],
+  input: PileInput,
+): Piles {
+  const now = input.now ?? new Date();
   const piles: Piles = {
     stand_on_this: [],
     already_in_the_lane: [],
     shipped_last_7_days: [],
   };
-  const filtered: PileResult["filtered"] = [];
-  let ignored = 0;
-  let below = 0;
-  let undated = 0;
 
   for (const hit of hits) {
-    if (hit.date_precision === "unparsed") undated += 1;
-
-    const ignoredBy = isIgnored(hit, ignore);
-    if (ignoredBy) {
-      ignored += 1;
-      filtered.push({ url: hit.url, title: hit.title, why: `muted by "${ignoredBy}"` });
+    if (
+      !isClaimRelevant(
+        hit,
+        input.fingerprints,
+        input.must_match ?? [],
+        input.ignore ?? [],
+      )
+    ) {
       continue;
     }
 
-    const { score, matched } = scoreHit(hit, fp);
-    const haystack = normalizeText(`${hit.title} ${hit.snippet}`);
-    const forced = mustMatch.find((m) => haystack.includes(m));
-
-    if (!forced && score < minScore) {
-      below += 1;
-      filtered.push({
-        url: hit.url,
-        title: hit.title,
-        why: `score ${score} below threshold ${minScore}`,
-      });
-      continue;
-    }
-
-    const recent = isWithinDays(hit.published_iso, now, recencyDays);
-    const base: ScoredHit = {
+    const age = daysSince(hit.published_at, now);
+    const piled: PileHit = {
       ...hit,
-      score: forced ? Math.max(score, minScore) : score,
-      matched: forced ? [...matched, `must_match:${forced}`] : matched,
-      reason: "",
+      id: hitId(hit.url),
+      why: why(hit, age),
+      collector: hit.source,
+      content_hash: contentHash(hit),
+      entity_key: entityKey(hit),
+      days_old: age,
     };
 
-    // Kind wins over recency, so a brand-new library is still something to
-    // build on rather than a competitor alarm. `also_recent` keeps that
-    // visible instead of hiding it.
-    if (looksReusable(hit)) {
-      piles.stand_on_this.push({
-        ...base,
-        also_recent: recent || undefined,
-        reason: matched.length
-          ? `reusable source matching ${matched.slice(0, 3).join(", ")}`
-          : "reusable source in the claim's area",
-      });
-    } else if (recent) {
-      piles.shipped_last_7_days.push({
-        ...base,
-        reason: `published ${hit.published_iso?.slice(0, 10)}${
-          hit.date_precision === "inferred-year" ? " (year inferred)" : ""
-        }`,
-      });
+    if (isStandOn(hit) && !(age !== null && age >= 0 && age <= 7)) {
+      piles.stand_on_this.push(piled);
+    } else if (age !== null && age >= 0 && age <= 7) {
+      piles.shipped_last_7_days.push(piled);
     } else {
-      piles.already_in_the_lane.push({
-        ...base,
-        reason: matched.length
-          ? `same job, matching ${matched.slice(0, 3).join(", ")}`
-          : "same job",
-      });
+      piles.already_in_the_lane.push(piled);
     }
   }
 
-  for (const key of Object.keys(piles) as Array<keyof Piles>) {
-    piles[key].sort((a, b) => b.score - a.score);
+  return piles;
+}
+
+function why(hit: PileableHit, age: number | null): string {
+  if (isStandOn(hit)) {
+    return `Matches the claim and looks like existing work to reuse (${hit.source_domain}).`;
   }
+  if (age !== null && age >= 0 && age <= 7) {
+    return `published_at ${hit.published_at} is within the last 7 days.`;
+  }
+  return `Same job as the claim, from ${hit.source}.`;
+}
 
-  const kept =
-    piles.stand_on_this.length +
-    piles.already_in_the_lane.length +
-    piles.shipped_last_7_days.length;
-
+export function emptyPiles(): Piles {
   return {
-    piles,
-    filtered,
-    quality: {
-      hits_in: hits.length,
-      kept,
-      below_threshold: below,
-      ignored,
-      undated,
-    },
+    stand_on_this: [],
+    already_in_the_lane: [],
+    shipped_last_7_days: [],
   };
 }
 
-/** Honest label for a pile, including when it is empty. */
-export function pileLabel(key: keyof Piles, count: number): string {
-  const names: Record<keyof Piles, string> = {
-    stand_on_this: "Stand on this",
-    already_in_the_lane: "Already in the lane",
-    shipped_last_7_days: "Shipped in the last 7 days",
+export function pileCounts(piles: Piles): Record<PileKey, number> {
+  return {
+    stand_on_this: piles.stand_on_this.length,
+    already_in_the_lane: piles.already_in_the_lane.length,
+    shipped_last_7_days: piles.shipped_last_7_days.length,
   };
-  if (count > 0) return `${names[key]} (${count})`;
-  const empty: Record<keyof Piles, string> = {
-    stand_on_this: "Stand on this — nothing the collectors returned looks reusable",
-    already_in_the_lane: "Already in the lane — nothing returned matched the claim",
-    shipped_last_7_days: "Shipped in the last 7 days — nothing dated inside the window",
-  };
-  return empty[key];
 }
