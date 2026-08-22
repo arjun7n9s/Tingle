@@ -1,0 +1,30 @@
+{
+  "mode": "example",
+  "note": "Synthetic rows. Field names are frozen; titles are fake.",
+  "rows": [
+    {
+      "source": "search",
+      "title": "Example Hit",
+      "url": "https://example.com/hit",
+      "snippet": "A synthetic listing card used to document the HitRow shape.",
+      "published_at": "2026-08-01",
+      "source_domain": "example.com"
+    },
+    {
+      "source": "watch",
+      "title": "Example Launch",
+      "url": "https://example.com/launch",
+      "snippet": "A synthetic daily-launch card with the same frozen fields.",
+      "published_at": "2026-08-20",
+      "source_domain": "example.com"
+    },
+    {
+      "source": "chaos",
+      "title": "Example Chaos Card",
+      "url": "https://chaos.example/launch/example",
+      "snippet": "A synthetic heal-fixture row. Not a real product.",
+      "published_at": "2026-08-20",
+      "source_domain": "chaos.example"
+    }
+  ]
+}

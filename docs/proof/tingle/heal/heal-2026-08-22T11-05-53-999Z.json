@@ -1,0 +1,91 @@
+{
+  "mode": "live",
+  "at": "2026-08-22T11:05:53.999Z",
+  "collector_id_before": "c_mt3jbbz21pal4p4vgp",
+  "collector_id_after": "c_mt3jbbz21pal4p4vgp",
+  "same_collector_id": true,
+  "broken_url": "https://gist.githubusercontent.com/arjun7n9s/45b7b192358d866cb8beb3e687564879/raw/redesign.html",
+  "auto_approve": true,
+  "before": {
+    "stored_as_success": true,
+    "row_count": 4
+  },
+  "after": {
+    "stored_as_success": true,
+    "healed": true,
+    "row_count": 4,
+    "heal_events": [
+      {
+        "id": "chaos-1787396640238-0",
+        "at": "2026-08-22T11:04:00.238Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "validation_failed",
+        "detail": "Zod validation failed for chaos",
+        "zod_issues": [
+          "empty dataset — extractor likely broken, not an empty niche"
+        ]
+      },
+      {
+        "id": "chaos-1787396640239-1",
+        "at": "2026-08-22T11:04:00.239Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "heal_started",
+        "detail": "The chaos listing failed schema validation after a DOM redesign. Issues: empty title/snippet — selectors moved from .claim-title/.hit-snippet to .product-heading/.tagline-text. Support BOTH layouts on this fixture. Layout A (original cards): each article.hit-card; title .claim-title; url a.hit[href]; snippet .hit-snippet; published_at .hit-date[datetime]. Layout B (redesign table): each tr.launch-row; title td.name; url a.permalink[href]; snippet td.blurb; published_at time[datetime]. Keep JSON field names title, url, snippet, published_at, source_domain. Public HTML only. No login."
+      },
+      {
+        "id": "chaos-1787396736557-2",
+        "at": "2026-08-22T11:05:36.557Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "heal_pending_approval",
+        "detail": "Heal status: pending_answer",
+        "preview": [
+          {
+            "title": "ClaimWatch",
+            "url": "https://chaos.example/launch/claimwatch",
+            "snippet": "Tells solo builders when somebody else ships the ...ilding. Watches launch boards and release notes.",
+            "published_at": {},
+            "source_domain": "chaos.example"
+          },
+          {
+            "title": "PriorArt Radar",
+            "url": "https://chaos.example/launch/priorart-radar",
+            "snippet": "Weekly digest of new filings and preprints that m... saved one-sentence description of your project.",
+            "published_at": {},
+            "source_domain": "chaos.example"
+          }
+        ]
+      },
+      {
+        "id": "chaos-1787396738320-3",
+        "at": "2026-08-22T11:05:38.320Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "heal_approved",
+        "detail": "Heal finished with status done"
+      },
+      {
+        "id": "chaos-1787396738320-4",
+        "at": "2026-08-22T11:05:38.320Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "retry_started",
+        "detail": "Re-triggering collector after heal"
+      },
+      {
+        "id": "chaos-1787396745538-5",
+        "at": "2026-08-22T11:05:45.538Z",
+        "collector_id": "c_mt3jbbz21pal4p4vgp",
+        "collector": "chaos",
+        "stage": "retry_succeeded",
+        "detail": "Recovered 4 row(s) for chaos"
+      }
+    ]
+  },
+  "index_after_heal": {
+    "stored_as_success": true,
+    "row_count": 4
+  }
+}
