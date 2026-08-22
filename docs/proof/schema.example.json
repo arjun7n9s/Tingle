@@ -4,7 +4,7 @@
     "is invented — no real site was scraped to produce this file.",
     "Real collect runs are gitignored, because evidencing a live scrape means",
     "recording someone else's URLs and titles. Run the script yourself to see",
-    "the real thing; it writes to docs/proof/live/, which stays on your disk."
+    "the real thing; it writes to docs/proof/tingle/live/, which stays on disk."
   ],
   "mode": "live",
   "at": "2026-01-01T00:00:00.000Z",

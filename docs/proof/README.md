@@ -2,10 +2,13 @@
 
 | Path | From | Committed? |
 |---|---|---|
-| `heal/heal-live-*.json` | `npm run prove:tingle-heal` | **yes** |
-| `live/collect-live-*.json` | `npm run prove:tingle-live` | no — local only |
+| `tingle/heal/heal-*.json` | `npm run prove:tingle-heal` (live chaos) | **yes** — synthetic fixture |
+| `tingle/live/` | `npm run prove:tingle-live` | no — local only |
 | `*-mock-*.json` | either script in mock mode | no |
-| `schema.example.json` | hand-written | yes |
+| `tingle/schema.example.json` | hand-written | yes |
+
+Older `heal/heal-live-*.json` files predate the `tingle/` prefix. Same rule:
+only chaos-heal evidence is kept.
 
 ## Why only the heal proof is committed
 
@@ -31,8 +34,8 @@ evidence that a real collector works. Mock runs prove the pipeline; they prove
 nothing about a collector.
 
 The heal artifact carries `collector_id_before`, `collector_id_after`, and
-`collector_ids_seen`. Those three agreeing is the whole point — a repair that
-issued a new id would break every schedule and caller pointing at the old one.
+`same_collector_id`. Those agreeing is the whole point — a repair that issued
+a new id would break every schedule and caller pointing at the old one.
 
 API tokens are stripped before anything is written. Collector ids are kept:
 they are not secrets, and they are the evidence.

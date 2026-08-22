@@ -43,18 +43,19 @@ Authenticate the scraper CLI (no global install needed):
 npx -p @brightdata/cli bdata login
 ```
 
-Then create the three collectors once and pin their ids in `.env`. Full
-walkthrough with the exact prompts: [docs/collectors.md](docs/collectors.md).
+Paste your three collector ids into `.env` (`TINGLE_C_SEARCH`, `TINGLE_C_WATCH`,
+`TINGLE_C_CHAOS`). This repo's pinned ids live in [AGENTS.md](AGENTS.md) — clones
+create their own once (see [docs/collectors.md](docs/collectors.md)) and never
+create them again.
 
 | Env var | Type | Target |
 |---|---|---|
-| `TINGLE_C_SEARCH` | Search | keyword built from the claim |
-| `TINGLE_C_WATCH` | Discovery / Sitemap | a long-tail launch board or changelog with dated entries |
-| `TINGLE_C_CHAOS` | Discovery | [`fixtures/tingle-chaos/`](fixtures/tingle-chaos/) — a fixture built to be broken |
+| `TINGLE_C_SEARCH` | **Discovery** on a fixed listing (not `{q}`) | [DEV `indiehackers` tag](https://dev.to/t/indiehackers) |
+| `TINGLE_C_WATCH` | **Discovery** | [Uneed](https://www.uneed.best/) daily launches |
+| `TINGLE_C_CHAOS` | **Discovery** | [`fixtures/tingle-chaos/`](fixtures/tingle-chaos/) — a fixture built to be broken |
 
 **Create once, then never again.** Creating a collector takes 5-25 minutes,
 costs credits, and a fresh id orphans everything pointing at the old one.
-[AGENTS.md](AGENTS.md) makes this a hard rule for coding agents working here.
 
 ## Mock vs live
 
@@ -67,43 +68,69 @@ Mock is for development. It is not evidence that a live collector works.
 ## Running it
 
 ```bash
-npm run serve          # http://127.0.0.1:8788
+npm run api            # http://127.0.0.1:8788  (was `serve` in early notes)
 npm run first-look request.json   # same pipeline, no browser
 ```
 
-Sign up with an email and a password, and you get two doors — **Quick chat**
-(one look, no project, no memory) and **New project** (confirm a claim, keep the
-result). A project page shows the three piles, a tool-gated analyst, a
-collapsible sources footer, and a Mute control that writes to the project's
-ignore list.
+Sign up with an email and a password. Two doors: **Quick chat** (one look, no
+project, no memory) and **New project** (confirm a claim, keep the result). A
+project page shows the three piles, a tool-gated analyst, a collapsible sources
+footer, Mute, a Tingle switch, and an event feed.
 
-The analyst answers only from stored rows: which lanes ran, what they returned,
-how recent it is, why a hit matched. Ask it who wins the market and it tells you
-no tool covers that — there is no model in the path capable of guessing.
+The analyst answers only from stored rows. Ask it who wins the market and it
+tells you no tool covers that.
 
 `POST /first-look` and `GET /health` remain available as JSON, so the pipeline
 is still drivable without the UI.
 
+## Heal a collector
+
+Heal repairs the extractor **in place**. The collector id does not change.
+
+```bash
+# Preview (default). Read the proposed diff before anything is committed.
+npx -p @brightdata/cli bdata scraper heal "$TINGLE_C_CHAOS" \
+  "<zod issues, verbatim>. Keep the same JSON field names." \
+  --url "$TINGLE_CHAOS_URL"
+
+npx -p @brightdata/cli bdata scraper approve "$TINGLE_C_CHAOS" \
+  --url "$TINGLE_CHAOS_URL" --auto-save
+```
+
+`--auto-approve` is for unattended jobs only (`TINGLE_HEAL_AUTO_APPROVE=1` or
+`npm run prove:tingle-heal -- --auto-approve`). A blind approve can commit a
+wrong schema to a live collector. Same `c_*` before and after — that is the
+whole reliability story.
+
+Full prompts: [docs/collectors.md](docs/collectors.md). Staging a DOM break:
+[fixtures/tingle-chaos/README.md](fixtures/tingle-chaos/README.md).
+
 ## Proofs
 
 ```bash
-npm run prove:tingle-live   # all three collectors return schema-valid rows
-npm run prove:tingle-heal   # break → validation fails → heal → approve → retry
+TINGLE_MOCK=1 npm test
+TINGLE_MOCK=1 npm run prove:tingle-shell
+TINGLE_MOCK=1 npm run prove:tingle-loop
+TINGLE_MOCK=1 npm run prove:tingle-vault
+TINGLE_MOCK=1 npm run prove:tingle-dedup
+TINGLE_MOCK=1 npm run prove:tingle-heal
+
+# Live (local only — needs a token and pinned ids). Do not commit the dump.
+npm run prove:tingle-live
+npm run prove:tingle-heal -- --auto-approve
 ```
 
-Artifacts land under `docs/proof/`, stamped `mode: "mock" | "live"` so a mock
-run can never be mistaken for a live one. Tokens are never written to disk.
+Artifacts land under `docs/proof/tingle/`, stamped `mode: "mock" | "live"` so a
+mock run can never be mistaken for a live one. Tokens are never written to disk.
 
-The heal proof is the one that matters, and the only one committed: the
-collector id is identical before and after the repair, and no application code
-changes. To stage a real DOM break, see
-[fixtures/tingle-chaos/README.md](fixtures/tingle-chaos/README.md).
+`prove:tingle-live` stays on your disk (`docs/proof/tingle/live/` is gitignored)
+because evidencing a live scrape means recording someone else's URLs and titles.
 
-Collect runs stay local — evidencing a live scrape means recording someone
-else's URLs and titles, so those artifacts are gitignored. Clone the repo, pin
-your own collectors, and run the script to produce them.
-[docs/proof/schema.example.json](docs/proof/schema.example.json) documents the
-shape with invented rows.
+The heal proof **is** committed: it runs against our synthetic chaos fixture,
+and the collector id is identical before and after. Latest live pass:
+[`docs/proof/tingle/heal/heal-2026-08-22T11-05-53-999Z.json`](docs/proof/tingle/heal/heal-2026-08-22T11-05-53-999Z.json).
+Shape reference with invented rows:
+[`docs/proof/tingle/schema.example.json`](docs/proof/tingle/schema.example.json).
 
 ## Public data only
 
@@ -111,19 +138,28 @@ Tingle reads **public HTML**. No login walls, no paywalls, no personal data.
 Files a user uploads are their own and are never scraped. The chaos fixture is
 entirely synthetic — every name and link on it is invented for testing.
 
+## Demo and submission
+
+- Recording script: [docs/demo.md](docs/demo.md)
+- How Scraper Studio was used: [docs/submission.md](docs/submission.md)
+
 ## Repo map
 
 | Path | Role |
 |---|---|
 | `packages/tingle-core/src/schema` | `HitRow` and heal-event schemas — the frozen field contract |
 | `packages/tingle-core/src/bd` | Scraper Studio client, validation gate, heal loop |
-| `packages/tingle-core/src/scripts` | `prove:tingle-live`, `prove:tingle-heal` |
+| `packages/tingle-core/src/http.ts` | Product API (auth, first look, Tingle tick, vault) |
+| `packages/tingle-core/src/scripts` | prove:live / heal / shell / loop / vault / dedup |
 | `fixtures/tingle-chaos` | Breakable fixture, served over GitHub Pages |
 | `docs/collectors.md` | Creating and pinning the three collectors |
-| `AGENTS.md` | Rules for coding agents working in this repo |
+| `AGENTS.md` | Rules for coding agents working here, including pinned `c_*` |
 
-## Status
+## CI
 
-Early. The extractor spine is the current focus; the product surface — claim
-confirmation, the three piles, the watch loop, email — comes after it, and
-deliberately not before.
+Push and pull-request runs use `TINGLE_MOCK=1` — tests plus the prove scripts,
+no token. An optional workflow (`Chaos heal`) can run the live chaos collector
+on a schedule or via `workflow_dispatch`. That job needs
+`BRIGHT_DATA_API_TOKEN` as a GitHub Actions secret and
+`TINGLE_HEAL_AUTO_APPROVE=1` (the unattended flag). It will not run a live heal
+without both.

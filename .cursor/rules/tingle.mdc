@@ -12,6 +12,8 @@ Non-negotiables:
 - **Never create a collector** for a target that already has a pinned id in
   `.env` (`TINGLE_C_SEARCH`, `TINGLE_C_WATCH`, `TINGLE_C_CHAOS`). Creating
   burns 5-25 minutes and credits, and a new id orphans downstream pointers.
+  This workspace: Search `c_mt3k9kgdv5dj23xxd`, Watch `c_mt3jjp0qjjjt1thr3`,
+  Chaos `c_mt3jbbz21pal4p4vgp`.
 - Heal in place: `refactor_template` → progress → `resume_automation_job`.
   **Same collector id** before and after. Preview then approve by default;
   auto-approve only behind a flag.

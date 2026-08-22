@@ -82,7 +82,10 @@ const payload = {
       }
     : undefined,
 };
-const outFile = path.join(outDir, `heal-${stamp}.json`);
+const outFile = path.join(
+  outDir,
+  config.mock ? `heal-mock-${stamp}.json` : `heal-${stamp}.json`,
+);
 await fs.writeFile(outFile, JSON.stringify(payload, null, 2), "utf8");
 
 console.log(`Wrote ${outFile}`);

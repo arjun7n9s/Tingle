@@ -1,0 +1,40 @@
+# Optional live chaos heal. Needs BRIGHT_DATA_API_TOKEN as a repo secret.
+# Unattended approve is behind TINGLE_HEAL_AUTO_APPROVE — schedule sets it;
+# workflow_dispatch defaults to preview-only unless you tick auto_approve.
+#
+# Without a token the job exits 0 and does nothing. It never reads .env.
+
+name: Chaos heal
+
+on:
+  workflow_dispatch:
+    inputs:
+      auto_approve:
+        description: "Unattended approve (TINGLE_HEAL_AUTO_APPROVE=1). Off = stop at preview."
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 7 * * 1"
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    env:
+      TINGLE_MOCK: "0"
+      BRIGHT_DATA_API_TOKEN: ${{ secrets.BRIGHT_DATA_API_TOKEN }}
+      TINGLE_C_CHAOS: c_mt3jbbz21pal4p4vgp
+      TINGLE_CHAOS_URL: https://arjun7n9s.github.io/Tingle/fixtures/tingle-chaos/
+      TINGLE_HEAL_AUTO_APPROVE: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.auto_approve == 'true' && '1' || '0') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Skip when no token
+        if: ${{ env.BRIGHT_DATA_API_TOKEN == '' }}
+        run: echo "No BRIGHT_DATA_API_TOKEN secret; skipping live heal."
+      - name: Live chaos heal
+        if: ${{ env.BRIGHT_DATA_API_TOKEN != '' }}
+        run: npm run prove:tingle-heal
