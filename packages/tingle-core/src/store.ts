@@ -1,6 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import {
+  SessionSchema,
+  UserSchema,
+  sessionValid,
+  type Session,
+  type User,
+} from "./auth.js";
 import { WatchProfileSchema, type WatchProfile } from "./schema/profile.js";
 
 export const BaselineEntrySchema = z.object({
@@ -49,6 +56,112 @@ export class ProjectStore {
     } catch {
       return null;
     }
+  }
+
+  // ── users and sessions ───────────────────────────────────────────────────
+
+  private usersFile() {
+    return path.join(this.rootDir, "users.json");
+  }
+  private sessionsFile() {
+    return path.join(this.rootDir, "sessions.json");
+  }
+
+  async listUsers(): Promise<User[]> {
+    const raw = (await this.readJson(this.usersFile())) ?? [];
+    return z.array(UserSchema).safeParse(raw).data ?? [];
+  }
+
+  async findUserByEmail(email: string): Promise<User | null> {
+    const target = email.trim().toLowerCase();
+    return (await this.listUsers()).find((u) => u.email === target) ?? null;
+  }
+
+  async findUserById(id: string): Promise<User | null> {
+    return (await this.listUsers()).find((u) => u.id === id) ?? null;
+  }
+
+  async addUser(user: User): Promise<void> {
+    const users = await this.listUsers();
+    if (users.some((u) => u.email === user.email)) {
+      throw new Error("an account with that email already exists");
+    }
+    await this.writeJson(this.usersFile(), [...users, user]);
+  }
+
+  async addSession(session: Session): Promise<void> {
+    const all = z
+      .array(SessionSchema)
+      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
+    // Drop expired rows on write, so the file does not grow forever.
+    const live = all.filter((s) => sessionValid(s));
+    await this.writeJson(this.sessionsFile(), [...live, session]);
+  }
+
+  async findSession(token: string): Promise<Session | null> {
+    const all = z
+      .array(SessionSchema)
+      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
+    const found = all.find((s) => s.token === token);
+    return found && sessionValid(found) ? found : null;
+  }
+
+  async removeSession(token: string): Promise<void> {
+    const all = z
+      .array(SessionSchema)
+      .safeParse((await this.readJson(this.sessionsFile())) ?? []).data ?? [];
+    await this.writeJson(
+      this.sessionsFile(),
+      all.filter((s) => s.token !== token && sessionValid(s)),
+    );
+  }
+
+  // ── projects ─────────────────────────────────────────────────────────────
+
+  /** Which projects belong to a user. Kept as an index so listing is cheap. */
+  private ownerFile() {
+    return path.join(this.rootDir, "project-owners.json");
+  }
+
+  async claimProject(userId: string, projectId: string): Promise<void> {
+    const map = (await this.readJson(this.ownerFile())) as Record<
+      string,
+      string
+    > | null;
+    const next = { ...(map ?? {}), [projectId]: userId };
+    await this.writeJson(this.ownerFile(), next);
+  }
+
+  async listProjects(userId: string): Promise<WatchProfile[]> {
+    const map =
+      ((await this.readJson(this.ownerFile())) as Record<string, string>) ?? {};
+    const ids = Object.entries(map)
+      .filter(([, owner]) => owner === userId)
+      .map(([id]) => id);
+    const out: WatchProfile[] = [];
+    for (const id of ids) {
+      const p = await this.loadProfile(id);
+      if (p) out.push(p);
+    }
+    return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }
+
+  async ownsProject(userId: string, projectId: string): Promise<boolean> {
+    const map =
+      ((await this.readJson(this.ownerFile())) as Record<string, string>) ?? {};
+    return map[projectId] === userId;
+  }
+
+  /** Last first-look result, so the project page and analyst have something to read. */
+  async saveLastLook(projectId: string, payload: unknown): Promise<void> {
+    await this.writeJson(
+      path.join(this.dir(projectId), "last-look.json"),
+      payload,
+    );
+  }
+
+  async loadLastLook(projectId: string): Promise<any | null> {
+    return this.readJson(path.join(this.dir(projectId), "last-look.json"));
   }
 
   async saveProfile(profile: WatchProfile): Promise<void> {

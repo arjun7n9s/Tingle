@@ -64,6 +64,26 @@ token, no credits, same code path; only the transport changes.
 
 Mock is for development. It is not evidence that a live collector works.
 
+## Running it
+
+```bash
+npm run serve          # http://127.0.0.1:8788
+npm run first-look request.json   # same pipeline, no browser
+```
+
+Sign up with an email and a password, and you get two doors — **Quick chat**
+(one look, no project, no memory) and **New project** (confirm a claim, keep the
+result). A project page shows the three piles, a tool-gated analyst, a
+collapsible sources footer, and a Mute control that writes to the project's
+ignore list.
+
+The analyst answers only from stored rows: which lanes ran, what they returned,
+how recent it is, why a hit matched. Ask it who wins the market and it tells you
+no tool covers that — there is no model in the path capable of guessing.
+
+`POST /first-look` and `GET /health` remain available as JSON, so the pipeline
+is still drivable without the UI.
+
 ## Proofs
 
 ```bash

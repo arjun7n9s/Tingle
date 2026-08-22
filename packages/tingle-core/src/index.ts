@@ -14,3 +14,7 @@ export * from "./bd/validate.js";
 export * from "./bd/scrape.js";
 export * from "./bd/mock.js";
 export * from "./jobs/firstLook.js";
+export * from "./auth.js";
+export * from "./analyst.js";
+export * from "./views.js";
+export * from "./server.js";

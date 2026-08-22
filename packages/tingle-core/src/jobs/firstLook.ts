@@ -39,6 +39,12 @@ export type FirstLookRequest = {
   confirmed?: boolean;
   must_match?: string[];
   now?: Date;
+  /**
+   * Write the profile and baseline. Quick chat sets this false: it is a
+   * throwaway look with no memory, and leaving a profile and baseline on disk
+   * would make it a project in everything but name.
+   */
+  persist?: boolean;
 };
 
 export type SourceReport = {
@@ -210,18 +216,24 @@ export async function runFirstLook(
     ...result.piles.already_in_the_lane,
     ...result.piles.shipped_last_7_days,
   ];
-  const baseline = await store.saveBaseline(
-    project_id,
-    lock,
-    kept.map((h) => ({
-      id: h.id,
-      url: h.url,
-      origin: h.origin,
-      content_hash: h.content_hash,
-    })),
-  );
+  const persist = req.persist ?? true;
+  const entries = kept.map((h) => ({
+    id: h.id,
+    url: h.url,
+    origin: h.origin,
+    content_hash: h.content_hash,
+  }));
+  const baseline = persist
+    ? await store.saveBaseline(project_id, lock, entries)
+    : {
+        project_id,
+        claim_lock: lock,
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+        entries: entries.map((e) => ({ ...e, first_seen: now.toISOString() })),
+      };
 
-  const existing = await store.loadProfile(project_id);
+  const existing = persist ? await store.loadProfile(project_id) : null;
   const profile = WatchProfileSchema.parse({
     project_id,
     stage: input.stage,
@@ -245,7 +257,7 @@ export async function runFirstLook(
     created_at: existing?.created_at ?? now.toISOString(),
     updated_at: now.toISOString(),
   });
-  await store.saveProfile(profile);
+  if (persist) await store.saveProfile(profile);
 
   const collectors = sources.filter((s) => s.kind === "collector");
   const adjuncts = sources.filter((s) => s.kind === "adjunct");
