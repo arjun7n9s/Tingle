@@ -18,7 +18,12 @@
     "prove:live": "tsx src/scripts/prove-live.ts",
     "prove:heal": "tsx src/scripts/prove-heal.ts",
     "first-look": "tsx src/scripts/first-look.ts",
-    "serve": "tsx src/scripts/serve.ts"
+    "api": "tsx src/http.ts",
+    "prove:shell": "tsx src/scripts/prove-shell.ts",
+    "prove:loop": "tsx src/scripts/prove-loop.ts",
+    "prove:vault": "tsx src/scripts/prove-vault.ts",
+    "prove:dedup": "tsx src/scripts/prove-dedup.ts",
+    "test": "tsx --test src/claim.test.ts src/piles.test.ts src/bd/validate.test.ts src/firstLook.test.ts src/analyst.test.ts src/tingleTick.test.ts src/vault.test.ts src/dedup.test.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
