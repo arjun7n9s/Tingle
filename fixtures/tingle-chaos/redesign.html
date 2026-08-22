@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tingle chaos board — redesigned listing</title>
+    <style>
+      body { font-family: "Segoe UI", sans-serif; background: #0b1020; color: #e8eefc; padding: 2rem; }
+      table { border-collapse: collapse; width: min(720px, 100%); }
+      td, th { border: 1px solid #243152; padding: 0.7rem 0.9rem; text-align: left; }
+      a { color: #3dff9a; }
+    </style>
+  </head>
+  <body>
+    <!--
+      LAYOUT CHANGE — no article.hit-card / .claim-title. Same four synthetic
+      products in a table so a card-based extractor returns empty or invalid
+      rows. Heal should recover these fields from the table.
+    -->
+    <h1>Launches</h1>
+    <table class="launch-table">
+      <thead>
+        <tr><th>name</th><th>link</th><th>blurb</th><th>day</th></tr>
+      </thead>
+      <tbody>
+        <tr class="launch-row">
+          <td class="name">ClaimWatch</td>
+          <td><a class="permalink" href="https://chaos.example/launch/claimwatch">open</a></td>
+          <td class="blurb">Tells solo builders when somebody else ships the thing they are halfway through building. Watches launch boards and release notes.</td>
+          <td><time datetime="2026-08-20">2026-08-20</time></td>
+        </tr>
+        <tr class="launch-row">
+          <td class="name">PriorArt Radar</td>
+          <td><a class="permalink" href="https://chaos.example/launch/priorart-radar">open</a></td>
+          <td class="blurb">Weekly digest of new filings and preprints that match a saved one-sentence description of your project.</td>
+          <td><time datetime="2026-08-18">2026-08-18</time></td>
+        </tr>
+        <tr class="launch-row">
+          <td class="name">NicheFill</td>
+          <td><a class="permalink" href="https://chaos.example/launch/nichefill">open</a></td>
+          <td class="blurb">Directory of indie products grouped by the job they do, updated daily from public launch pages.</td>
+          <td><time datetime="2026-08-11">2026-08-11</time></td>
+        </tr>
+        <tr class="launch-row">
+          <td class="name">ScrapeKeeper</td>
+          <td><a class="permalink" href="https://chaos.example/launch/scrapekeeper">open</a></td>
+          <td class="blurb">Hosted extractors that repair their own selectors when a target site redesigns, so downstream pipelines keep the same collector id.</td>
+          <td><time datetime="2026-07-29">2026-07-29</time></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
