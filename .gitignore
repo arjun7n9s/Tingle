@@ -29,3 +29,7 @@ progress.md
 
 # Local first-look request fixtures
 .fixtures/
+
+# Tingle live Search/Watch dumps (third-party titles)
+docs/proof/tingle/live/
+
