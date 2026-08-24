@@ -3,7 +3,8 @@ import { BrightDataClient } from "../bd/client.js";
 import { scrapeAndValidate } from "../bd/scrape.js";
 import type { CollectorKey, TingleConfig } from "../config.js";
 import { isCapHit, PAUSE_COPY, remaining, spend, wouldExceed } from "../budget.js";
-import { isClaimRelevant } from "../claim.js";
+import { isClaimRelevant, searchPhrasesFromClaim } from "../claim.js";
+import { extractSearchPhrases } from "../llm.js";
 import { fileMailer, mailFromEvents, type Mailer, type OutgoingMail } from "../mail.js";
 import {
   contentHash,
@@ -28,6 +29,7 @@ import { clusterEntityKey, clusterHits, isMuted } from "../dedup.js";
 import { extraWatchUrls } from "../longTail.js";
 import { fetchMarketplaceAdjuncts } from "../marketplace.js";
 import { planLanes } from "../collectors.js";
+import { isOptionalGap } from "../adjunct.js";
 import { enrichPatentDetails } from "./patentDetails.js";
 import { fetchPatentListings } from "./patentListings.js";
 import {
@@ -208,7 +210,9 @@ export async function tingleTick(
   const now = opts.now ?? new Date();
   const healEvents: HealEvent[] = [];
   const collectorsFailed: string[] = [
-    ...plan.missing.map((m) => `${m.key}: ${m.reason}`),
+    ...plan.missing
+      .filter((m) => m.key !== "patent")
+      .map((m) => `${m.key}: ${m.reason}`),
   ];
   const rawHits: PileableHit[] = [];
   let pageLoads = 0;
@@ -261,33 +265,28 @@ export async function tingleTick(
     );
   }
 
-  const wantedPatent = plan.jobs.some((j) => j.key === "patent");
-  if (wantedPatent && !rawHits.some((h) => h.collector === "patent")) {
-    const listing = await fetchPatentListings(deps.config, query, { country });
+  const patentQuery =
+    (await extractSearchPhrases(project.claim, deps.config.llm))[0] ??
+    searchPhrasesFromClaim(project.claim)[0] ??
+    query;
+  {
+    const listing = await fetchPatentListings(deps.config, patentQuery, { country });
     collectorsFailed.push(...listing.failed);
-    if (listing.skipped) {
-      collectorsFailed.push(
-        `unlocker:listing: ${listing.skipped} — Studio Patents crawler cannot open patents.google.com`,
-      );
-    } else if (listing.rows.length === 0 && listing.failed.length === 0) {
-      collectorsFailed.push(
-        "unlocker:listing: no patent cards in Unlocker markdown",
-      );
-    } else if (listing.rows.length) {
+    if (listing.rows.length) {
       rawHits.push(...listing.rows);
       if (!deps.config.mock) pageLoads += 1;
     }
   }
 
   let serpSnapshots: Record<string, string[]> = {};
-  if (wantedPatent) {
-    const discovery = await fetchPatentSerpDiscovery(deps.config, project.claim);
+  {
+    const discovery = await fetchPatentSerpDiscovery(deps.config, patentQuery);
     collectorsFailed.push(...discovery.failed);
     serpSnapshots = mergeSnapshots(serpSnapshots, discovery.snapshots);
     if (discovery.rows.length) mergeHits(rawHits, discovery.rows);
   }
 
-  const regional = await fetchRegionalSerp(deps.config, project.claim);
+  const regional = await fetchRegionalSerp(deps.config, patentQuery);
   collectorsFailed.push(...regional.failed);
   serpSnapshots = mergeSnapshots(serpSnapshots, regional.snapshots);
   if (regional.rows.length) mergeHits(rawHits, regional.rows);
@@ -405,7 +404,7 @@ export async function tingleTick(
     paused,
     paused_reason,
     transport,
-    collectors_failed: collectorsFailed,
+    collectors_failed: collectorsFailed.filter((n) => !isOptionalGap(n)),
     heal_events: healEvents,
     baseline: nextBaseline,
   };

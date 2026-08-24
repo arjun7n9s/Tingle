@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { fetchAdjuncts } from "../adjunct.js";
+import { fetchAdjuncts, isOptionalGap } from "../adjunct.js";
 import {
   compileClaimGraph,
   flattenGraphQueries,
@@ -10,6 +10,7 @@ import { fetchMarketplaceAdjuncts } from "../marketplace.js";
 import { BrightDataClient } from "../bd/client.js";
 import { scrapeAndValidate } from "../bd/scrape.js";
 import { proposeClaim } from "../claim.js";
+import { extractSearchPhrases } from "../llm.js";
 import {
   loadTingleConfig,
   type TingleConfig,
@@ -234,7 +235,9 @@ export async function firstLook(
     query,
   });
   collectorsFailed.push(
-    ...plan.missing.map((m) => `${m.key}: ${m.reason}`),
+    ...plan.missing
+      .filter((m) => m.key !== "patent")
+      .map((m) => `${m.key}: ${m.reason}`),
   );
 
   const scrapeJobs =
@@ -271,20 +274,13 @@ export async function firstLook(
     );
   }
 
-  const wantedPatent = scrapeJobs.some((j) => j.key === "patent");
+  const phrases = await extractSearchPhrases(proposed.claim, config.llm);
+  const patentQuery = phrases[0] ?? query;
   let listingUnlocker = false;
-  if (wantedPatent && !hits.some((h) => h.collector === "patent")) {
-    const listing = await fetchPatentListings(config, query, { country });
+  if (req.include_adjuncts !== false) {
+    const listing = await fetchPatentListings(config, patentQuery, { country });
     collectorsFailed.push(...listing.failed);
-    if (listing.skipped) {
-      collectorsFailed.push(
-        `unlocker:listing: ${listing.skipped} — Studio Patents crawler cannot open patents.google.com`,
-      );
-    } else if (listing.rows.length === 0 && listing.failed.length === 0) {
-      collectorsFailed.push(
-        "unlocker:listing: no patent cards in Unlocker markdown",
-      );
-    } else if (listing.rows.length) {
+    if (listing.rows.length) {
       hits.push(...listing.rows);
       listingUnlocker = true;
     }
@@ -292,25 +288,21 @@ export async function firstLook(
 
   let serpPatent = false;
   let serpSnapshots: Record<string, string[]> = {};
-  if (wantedPatent) {
-    const discovery = await fetchPatentSerpDiscovery(config, proposed.claim);
+  if (req.include_adjuncts !== false) {
+    const discovery = await fetchPatentSerpDiscovery(config, patentQuery);
     collectorsFailed.push(...discovery.failed);
     serpSnapshots = mergeSnapshots(serpSnapshots, discovery.snapshots);
-    if (discovery.skipped) {
-      collectorsFailed.push(`serp:patent: ${discovery.skipped}`);
-    } else if (discovery.rows.length) {
+    if (discovery.rows.length) {
       mergeHits(hits, discovery.rows);
       serpPatent = true;
     }
   }
 
   if (req.include_adjuncts !== false) {
-    const regional = await fetchRegionalSerp(config, proposed.claim);
+    const regional = await fetchRegionalSerp(config, patentQuery);
     collectorsFailed.push(...regional.failed);
     serpSnapshots = mergeSnapshots(serpSnapshots, regional.snapshots);
-    if (regional.skipped) {
-      collectorsFailed.push(`serp:regional: ${regional.skipped}`);
-    } else if (regional.rows.length) {
+    if (regional.rows.length) {
       mergeHits(hits, regional.rows);
       serpPatent = true;
     }
@@ -324,7 +316,9 @@ export async function firstLook(
           claim: proposed.claim,
           githubUrl: req.github_url,
           patentNumber: req.patent_number,
-          queries: flattenGraphQueries(graph, 4),
+          queries: [...phrases, ...flattenGraphQueries(graph, 4)]
+            .filter(Boolean)
+            .slice(0, 4),
         });
   hits.push(...adjunct.rows);
   collectorsFailed.push(...adjunct.collectors_failed);
@@ -457,7 +451,7 @@ export async function firstLook(
       ...market.sources_used,
       ...unlockerSources,
     ],
-    collectors_failed: collectorsFailed,
+    collectors_failed: collectorsFailed.filter((n) => !isOptionalGap(n)),
     quality: {
       hit_count_per_pile: pileCounts(piles),
       collectors_returned: collectorsReturned.filter(

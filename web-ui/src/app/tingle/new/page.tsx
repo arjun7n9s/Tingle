@@ -285,8 +285,8 @@ function NewProjectForm() {
           <textarea
             value={proposed}
             onChange={(e) => setProposed(e.target.value)}
-            rows={3}
-            className="w-full"
+            rows={8}
+            className="tingle-pad w-full"
           />
           <button
             type="button"

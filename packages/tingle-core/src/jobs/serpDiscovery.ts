@@ -1,3 +1,4 @@
+import { searchPhrasesFromClaim } from "../claim.js";
 import type { TingleConfig } from "../config.js";
 import type { PileableHit } from "../piles.js";
 import { fetchSerp } from "../serp.js";
@@ -27,7 +28,9 @@ const REGIONAL: Array<{ engine: string; url: (q: string) => string }> = [
 ];
 
 export function patentSiteQueries(claim: string): string[] {
-  const q = claim.replace(/\s+/g, " ").trim().slice(0, 80);
+  const q =
+    searchPhrasesFromClaim(claim)[0] ??
+    claim.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!q) return [];
   return PATENT_SITES.map((site) => `site:${site} ${q}`);
 }
@@ -78,7 +81,9 @@ export async function fetchRegionalSerp(
   config: TingleConfig,
   claim: string,
 ): Promise<SerpDiscoveryResult> {
-  const q = claim.replace(/\s+/g, " ").trim().slice(0, 80);
+  const q =
+    searchPhrasesFromClaim(claim)[0] ??
+    claim.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!q) return { rows: [], failed: [], snapshots: {} };
   const rows: PileableHit[] = [];
   const failed: string[] = [];

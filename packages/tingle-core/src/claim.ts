@@ -65,13 +65,19 @@ export type ProposedClaim = {
  * Deterministic rewrite — no model. First sentence of pitch/docs, collapsed.
  * Credits are not spent until the caller sends this sentence back confirmed.
  */
+export function looksTruncatedClaim(claim: string): boolean {
+  return /…|\.{3}\s*$/.test(claim.trim());
+}
+
 export function proposeClaim(input: {
   pitch?: string;
   docs_text?: string;
   claim?: string;
 }): ProposedClaim {
+  const stored =
+    input.claim && !looksTruncatedClaim(input.claim) ? input.claim : "";
   const claim = rewriteToSentence(
-    input.claim || firstSentence(input.pitch) || firstSentence(input.docs_text) || "",
+    stored || firstSentence(input.pitch) || firstSentence(input.docs_text) || input.claim || "",
   );
   const fingerprints = buildFingerprints(
     claim,
@@ -92,11 +98,21 @@ export function proposeClaim(input: {
 }
 
 export function rewriteToSentence(raw: string): string {
-  const collapsed = raw.replace(/\s+/g, " ").trim();
+  const collapsed = raw.replace(/\s+/g, " ").trim().replace(/…+/g, "");
   if (!collapsed) return "";
   const cut = collapsed.split(/(?<=[.!?])\s+/)[0] ?? collapsed;
-  const sentence = cut.length > 220 ? `${cut.slice(0, 217).trim()}…` : cut;
-  return sentence.replace(/[.!?]+$/, "");
+  return cut.replace(/[.!?]+$/, "").trim();
+}
+
+/**
+ * Short phrases for SERP / Unlocker patent search. Distinctive tokens only —
+ * never a filing number the pitch did not contain.
+ */
+export function searchPhrasesFromClaim(claim: string): string[] {
+  const distinctive = tokens(claim).filter(isDistinctiveToken);
+  if (distinctive.length >= 2) return [distinctive.slice(0, 6).join(" ")];
+  const words = claim.replace(/\s+/g, " ").trim().split(/\s+/).filter(Boolean);
+  return words.length ? [words.slice(0, 8).join(" ")] : [];
 }
 
 /**

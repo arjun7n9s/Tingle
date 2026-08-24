@@ -5,6 +5,7 @@ import { MOCK_UNLOCKER_LISTING_MARKDOWN } from "../bd/unlocker.js";
 import {
   fetchPatentListings,
   isUnlockerHostBlock,
+  parseGooglePatentsXhr,
   parsePatentListingMarkdown,
 } from "./patentListings.js";
 
@@ -15,6 +16,39 @@ describe("parsePatentListingMarkdown", () => {
     assert.equal(rows[0]?.title, "Haptic wearable alert");
     assert.match(rows[0]?.url ?? "", /\/patent\/US20140142851A1/);
     assert.equal(rows[0]?.collector, "patent");
+  });
+
+  it("keeps Espacenet cards from markdown", () => {
+    const rows = parsePatentListingMarkdown(
+      "[Speech masking canopy](https://worldwide.espacenet.com/patent/search/family/123?q=US2014)",
+    );
+    assert.equal(rows[0]?.title, "Speech masking canopy");
+    assert.match(rows[0]?.url ?? "", /espacenet/);
+  });
+});
+
+describe("parseGooglePatentsXhr", () => {
+  it("keeps publication numbers from Google JSON and does not invent them", () => {
+    const rows = parseGooglePatentsXhr({
+      results: {
+        cluster: [
+          {
+            result: [
+              {
+                patent: {
+                  publication_number: "US20140142851A1",
+                  title: "Haptic wearable alert",
+                  snippet: "A glove that vibrates.",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.title, "Haptic wearable alert");
+    assert.match(rows[0]?.url ?? "", /US20140142851A1/);
   });
 });
 

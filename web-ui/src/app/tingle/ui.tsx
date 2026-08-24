@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Spidey } from "./Spidey";
 
 type Hit = {
@@ -28,6 +29,38 @@ function hitsFor(piles: Piles, key: keyof Piles): Hit[] {
     return piles.local_lane ?? piles.already_in_the_lane ?? [];
   }
   return piles[key] ?? [];
+}
+
+function isNoiseMiss(row: string): boolean {
+  return /USPTO_ODP_API_KEY|PatentsView|serp_unconfigured|adjunct skipped|TINGLE_C_PATENT not pinned|missing_unlocker_zone/i.test(
+    row,
+  );
+}
+
+/** Full confirmed sentence. Collapse long claims; never store a literal ellipsis cut. */
+export function ClaimText({ claim }: { claim: string }) {
+  const [open, setOpen] = useState(false);
+  const long = claim.length > 280;
+  return (
+    <div className="mt-2 max-w-2xl">
+      <p
+        className={`text-[0.98rem] leading-relaxed text-[var(--muted)] ${
+          long && !open ? "line-clamp-4" : ""
+        }`}
+      >
+        {claim}
+      </p>
+      {long ? (
+        <button
+          type="button"
+          className="tingle-claim-more"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "Show less" : "Show full claim"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export type FileProject = {
@@ -143,7 +176,7 @@ export function LookPanel({
 }) {
   const dropped = look.quality?.dropped_sample ?? [];
   const droppedCount = look.quality?.dropped_count ?? dropped.length;
-  const missed = look.collectors_failed ?? [];
+  const missed = (look.collectors_failed ?? []).filter((row) => !isNoiseMiss(row));
   const heals = look.heal_events ?? [];
   const pendingHeal = heals.some((e) => e.stage.includes("pending"));
   return (

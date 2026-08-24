@@ -6,7 +6,7 @@ import { answerAnalyst } from "./analyst.js";
 import { PAUSE_COPY, spend, wouldExceed, isCapHit } from "./budget.js";
 import { BrightDataClient } from "./bd/client.js";
 import { mockNewWatchLaunch } from "./bd/mock.js";
-import { proposeClaim, titleFromClaim } from "./claim.js";
+import { proposeClaim, titleFromClaim, looksTruncatedClaim } from "./claim.js";
 import { polishClaim } from "./llm.js";
 import { CLAIM_LOCK_WARNING, muteTokens } from "./dedup.js";
 import { loadEnv, loadTingleConfig, type TingleConfig } from "./config.js";
@@ -409,7 +409,13 @@ export async function handleTingleRequest(
 
       if (method === "POST" && action === "first-look") {
         const body = asRec(await readJson(req));
-        const incoming = str(body.claim) || project.claim;
+        let incoming = str(body.claim) || project.claim;
+        if (looksTruncatedClaim(incoming) && (project.pitch || project.docs_text)) {
+          incoming = await polishClaim(
+            project.pitch || project.docs_text || incoming,
+            config.llm,
+          );
+        }
         const rebuild = body.rebuild === true;
         if (
           project.claim_locked &&

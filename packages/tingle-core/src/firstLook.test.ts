@@ -121,7 +121,7 @@ describe("firstLook", () => {
     assert.ok(result.sources_used.includes("hn"));
   });
 
-  it("for a JP look, Uneed is not home and an unpinned Google Patents pin is a collector failure", async () => {
+  it("for a JP look, Uneed is not home and a missing JP board is a collector failure", async () => {
     const result = await firstLook(
       {
         pitch: config.sampleClaim,
@@ -134,8 +134,8 @@ describe("firstLook", () => {
     assert.equal(result.status, "ok");
     if (result.status !== "ok") return;
     assert.ok(
-      result.collectors_failed.some((s) => s.startsWith("patent:")),
-      "unpinned Google Patents must be a collector failure, not an empty Japan niche",
+      !result.collectors_failed.some((s) => s.startsWith("patent:")),
+      "unpinned Studio Patents is covered by SERP/Unlocker adjuncts",
     );
     assert.ok(result.collectors_failed.some((s) => s.startsWith("region_jp:")));
     assert.ok(result.sources_used.includes("search"));

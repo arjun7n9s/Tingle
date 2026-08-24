@@ -34,6 +34,27 @@ describe("proposeClaim", () => {
       "haptic navigation",
     );
   });
+
+  it("does not ellipsis-truncate a long one-sentence pitch", () => {
+    const pitch =
+      "Unlike standard active noise-canceling headphones that block all sound or basic white-noise machines that play a static hiss, this system uses ambient IoT sensors and directional micro-speakers embedded in individual desk canopies to generate a localized psychoacoustic masking sound tuned to human speech.";
+    const p = proposeClaim({ pitch });
+    assert.doesNotMatch(p.claim, /…|\.\.\./);
+    assert.match(p.claim.toLowerCase(), /psychoacoustic/);
+    assert.match(p.claim.toLowerCase(), /desk canopies/);
+  });
+
+  it("rebuilds from the pitch when a stored claim was ellipsis-cut", () => {
+    const pitch =
+      "Unlike standard active noise-canceling headphones that block all sound, this system uses ambient IoT sensors and directional micro-speakers in desk canopies to generate a localized psychoacoustic masking sound.";
+    const p = proposeClaim({
+      pitch,
+      claim:
+        "This system uses ambient IoT sensors and directional micro-speakers in desk canopies to analyze and manage nearby sounds, distinguishing between general murmurs, sharp noises, and human speech to reduce cognitive dist…",
+    });
+    assert.doesNotMatch(p.claim, /…|\.\.\./);
+    assert.match(p.claim.toLowerCase(), /psychoacoustic|desk canopies/);
+  });
 });
 
 describe("titleFromClaim", () => {

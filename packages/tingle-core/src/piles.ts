@@ -86,7 +86,7 @@ const PATENT_HOSTS = new Set([
   "kipris.or.kr",
   "cnipa.gov.cn",
   "ip2.sg",
-  "fips.ru",
+  "lens.org",
 ]);
 
 const STAND_TITLE =

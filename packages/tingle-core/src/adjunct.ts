@@ -19,6 +19,13 @@ export type AdjunctResult = {
   collectors_failed: string[];
 };
 
+/** Config holes covered by other adjuncts — not a missed Studio collector. */
+export function isOptionalGap(note: string): boolean {
+  return /USPTO_ODP_API_KEY|PatentsView|serp_unconfigured|adjunct skipped|TINGLE_C_PATENT not pinned|missing_unlocker_zone/i.test(
+    note,
+  );
+}
+
 const UA = "Tingle/0.1 (claim-watch; +https://dev.to/t/indiehackers)";
 
 function pairRank(parts: string[]): number {
@@ -155,7 +162,9 @@ export async function fetchAdjuncts(
   return {
     rows,
     sources_used: [...ok],
-    collectors_failed: failNotes.filter((note) => !ok.has(note.split(":")[0] ?? "")),
+    collectors_failed: failNotes.filter(
+      (note) => !ok.has(note.split(":")[0] ?? "") && !isOptionalGap(note),
+    ),
   };
 }
 
@@ -209,7 +218,9 @@ export async function fetchPriorArt(
   return {
     rows,
     sources_used: [...ok],
-    collectors_failed: failNotes.filter((note) => !ok.has(note.split(":")[0] ?? "")),
+    collectors_failed: failNotes.filter(
+      (note) => !ok.has(note.split(":")[0] ?? "") && !isOptionalGap(note),
+    ),
   };
 }
 
@@ -585,11 +596,7 @@ async function fetchUspto(
   limit = 5,
 ): Promise<PileableHit[]> {
   const cap = Math.min(25, Math.max(1, limit));
-  if (!apiKey) {
-    throw new Error(
-      "USPTO PatentsView no longer returns JSON. Set USPTO_ODP_API_KEY to search the Open Data Portal.",
-    );
-  }
+  if (!apiKey) return [];
   const q = patentNumber
     ? `applicationMetaData.patentNumber:${patentNumber.replace(/[^0-9]/g, "")}`
     : tokens(query)

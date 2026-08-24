@@ -1,6 +1,10 @@
 import type { FirstLookResult } from "./jobs/firstLook.js";
 import type { PileHit } from "./piles.js";
-import { rewriteToSentence, tokens } from "./claim.js";
+import {
+  rewriteToSentence,
+  searchPhrasesFromClaim,
+  tokens,
+} from "./claim.js";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -165,8 +169,9 @@ export async function completeJson(
 }
 
 /**
- * LLM may tidy a messy pitch into one sentence. It cannot add a product
- * that was not in the pitch — overlap with the deterministic rewrite is required.
+ * LLM may tidy a messy pitch into one complete sentence. It cannot add a
+ * product that was not in the pitch. Never ellipsis-truncate — the confirm
+ * box is the full claim.
  */
 export async function polishClaim(
   raw: string,
@@ -180,19 +185,54 @@ export async function polishClaim(
       {
         role: "system",
         content:
-          "Rewrite the builder's pitch into ONE plain sentence. Do not add products, markets, or features that are not in the pitch. No TAM. No score. Return only the sentence.",
+          "Rewrite the builder's pitch into ONE complete plain sentence that covers the object and the mechanism. Keep distinctive terms. If the pitch is already one sentence, prefer that wording. Do not add products, markets, or features that are not in the pitch. Do not use an ellipsis, '...' or cut off mid-word. No TAM. No score. Return only the sentence.",
       },
-      { role: "user", content: sanitizeScraped(raw).slice(0, 1500) },
+      { role: "user", content: sanitizeScraped(raw).slice(0, 4000) },
     ],
     { temperature: 0, timeoutMs: 12_000 },
   );
   const polished = rewriteToSentence(polishedRaw ?? "");
   if (!polished) return base;
-  const baseToks = new Set(tokens(base));
-  const newToks = tokens(polished);
-  const overlap = newToks.filter((tok) => baseToks.has(tok)).length;
-  if (overlap < 1) return base;
+  if (/…|\.{3}/.test(polished)) return base;
+  if (base.length > 200 && polished.length < base.length * 0.75) return base;
+  const sourceToks = new Set(tokens(raw));
+  const overlap = tokens(polished).filter((tok) => sourceToks.has(tok)).length;
+  if (overlap < 2) return base;
   return polished;
+}
+
+/**
+ * Search phrases for patent/paper adjuncts. Phrases only — never URLs or
+ * invented filing numbers. Falls back to distinctive tokens from the claim.
+ */
+export async function extractSearchPhrases(
+  claim: string,
+  llm?: LlmConfig,
+): Promise<string[]> {
+  const fallback = searchPhrasesFromClaim(claim);
+  if (!llm || !claim.trim()) return fallback;
+  const parsed = await completeJson(
+    llm,
+    [
+      {
+        role: "system",
+        content:
+          'Extract 3 to 5 short search phrases (2-8 words) for finding public patents and papers about this invention. Use only terms from the pitch. No patent numbers, no URLs, no company names that were not in the pitch. JSON: {"phrases":["..."]}',
+      },
+      { role: "user", content: sanitizeScraped(claim).slice(0, 2000) },
+    ],
+    { temperature: 0, timeoutMs: 10_000 },
+  );
+  const phrases = Array.isArray((parsed as { phrases?: unknown })?.phrases)
+    ? ((parsed as { phrases: unknown[] }).phrases)
+        .filter((p): p is string => typeof p === "string")
+        .map((p) => p.replace(/\s+/g, " ").trim())
+        .filter((p) => p.length >= 4 && p.length <= 80)
+        .filter((p) => !/https?:|US\d{6,}/i.test(p))
+        .filter((p) => tokens(p).some((t) => tokens(claim).includes(t)))
+        .slice(0, 5)
+    : [];
+  return phrases.length ? phrases : fallback;
 }
 
 export async function narrateLook(opts: {

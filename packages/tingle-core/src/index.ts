@@ -53,6 +53,8 @@ export {
   isClaimRelevant,
   scoreAgainstClaim,
   titleFromClaim,
+  searchPhrasesFromClaim,
+  looksTruncatedClaim,
 } from "./claim.js";
 export {
   compileClaimGraph,

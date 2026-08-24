@@ -1,9 +1,12 @@
-import { adjunctSearchQueries, fetchPriorArt } from "../adjunct.js";
+import { adjunctSearchQueries, fetchPriorArt, isOptionalGap } from "../adjunct.js";
 import { proposeClaim, isClaimRelevant, scoreAgainstClaim } from "../claim.js";
 import { fallbackCompile, flattenGraphQueries } from "../claimGraph.js";
 import type { TingleConfig } from "../config.js";
+import { extractSearchPhrases } from "../llm.js";
 import { fetchMarketplaceAdjuncts } from "../marketplace.js";
 import type { PileableHit } from "../piles.js";
+import { fetchPatentListings } from "./patentListings.js";
+import { fetchPatentSerpDiscovery } from "./serpDiscovery.js";
 
 export const PATENTABILITY_DISCLAIMER =
   "Not a legal opinion and not a patent grant. A patent office decides patentability. This memo only maps what this scrape returned for the confirmed claim.";
@@ -151,12 +154,19 @@ export async function runPatentability(
     ? input.fingerprints
     : proposed.fingerprints;
   const claim = proposed.claim || input.claim;
+  const phrases = await extractSearchPhrases(claim, deps.config.llm);
   const graphQueries = flattenGraphQueries(fallbackCompile(claim), 5);
   const queries = [
-    ...new Set([...graphQueries, ...adjunctSearchQueries(claim, fingerprints, 5)]),
+    ...new Set([
+      ...phrases,
+      ...graphQueries,
+      ...adjunctSearchQueries(claim, fingerprints, 5),
+    ]),
   ]
     .filter((q) => q && !/^autonomous$/i.test(q))
     .slice(0, 5);
+  const listing = await fetchPatentListings(deps.config, queries[0] ?? claim);
+  const serp = await fetchPatentSerpDiscovery(deps.config, queries[0] ?? claim);
   const corpus = await fetchPriorArt(deps.config, {
     claim,
     fingerprints,
@@ -171,12 +181,19 @@ export async function runPatentability(
     pollMs: 180_000,
     allowEmpty: true,
   });
-  const rows = [...corpus.rows, ...market.rows];
-  const sources_used = [...corpus.sources_used, ...market.sources_used];
+  const rows = [...listing.rows, ...serp.rows, ...corpus.rows, ...market.rows];
+  const sources_used = [
+    ...(listing.rows.length ? ["unlocker"] : []),
+    ...(serp.rows.length ? ["serp"] : []),
+    ...corpus.sources_used,
+    ...market.sources_used,
+  ];
   const collectors_failed = [
+    ...listing.failed,
+    ...serp.failed,
     ...corpus.collectors_failed,
     ...market.collectors_failed,
-  ];
+  ].filter((n) => !isOptionalGap(n));
 
   const angles: PatentabilityAngle[] = queries.map((angle) => {
     const matched = rows.filter((h) =>
