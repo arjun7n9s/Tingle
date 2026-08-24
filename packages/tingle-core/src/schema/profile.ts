@@ -1,99 +1,68 @@
 import { z } from "zod";
 
-/**
- * Where the builder is. Drives what counts as urgent later, and what the first
- * look is even looking for. Always user-supplied — never inferred and hidden,
- * because a wrong guess silently retargets the whole watch.
- */
 export const StageSchema = z.enum(["starting", "building", "shipped"]);
 export type Stage = z.infer<typeof StageSchema>;
 
-export const LaneSchema = z.enum(["cheap", "deep"]);
-
-export const BudgetSchema = z.object({
-  /** Hard ceiling in page loads. Watch pauses when exceeded. */
-  cap_page_loads: z.number().int().positive().default(500),
-  spent_page_loads: z.number().int().nonnegative().default(0),
-  lane: LaneSchema.default("cheap"),
+export const FirstLookTogglesSchema = z.object({
+  pitch: z.string().optional(),
+  docs_text: z.string().optional(),
+  links: z.array(z.string().url()).optional(),
+  github_url: z.string().optional(),
+  watch_list: z.array(z.string()).optional(),
+  patent_number: z.string().optional(),
+  ignore: z.array(z.string()).optional(),
 });
+export type FirstLookToggles = z.infer<typeof FirstLookTogglesSchema>;
+
+export const DigestFloorSchema = z.enum(["daily", "weekly"]);
+export type DigestFloor = z.infer<typeof DigestFloorSchema>;
+
+export const BudgetLaneSchema = z.enum(["cheap", "deep"]);
+export const BudgetSchema = z.object({
+  cap: z.number().nonnegative().default(50),
+  spent: z.number().nonnegative().default(0),
+  lane: BudgetLaneSchema.default("cheap"),
+});
+export type Budget = z.infer<typeof BudgetSchema>;
+
+export const GeoSchema = z.object({
+  country: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((c) => c.toUpperCase()),
+  jurisdictions: z.array(z.string()).optional(),
+});
+export type Geo = z.infer<typeof GeoSchema>;
+
+export const DEFAULT_BUDGET: Budget = { cap: 50, spent: 0, lane: "cheap" };
 
 /**
- * The watch profile is the product. Everything else is derived from it.
- *
- * Mirrors the storage shape so a vault row and a repo-local file are the same
- * object with a different backend.
+ * The persisted watch object. First look and later Tingle ticks both derive
+ * from this; they do not keep a parallel copy of the pitch.
  */
 export const WatchProfileSchema = z.object({
-  project_id: z.string().min(1),
+  project_id: z.string(),
   stage: StageSchema,
-  /** The one confirmed sentence. This *is* the watch. */
+  extra_question: z.string().optional(),
   claim: z.string().min(1),
-  /**
-   * Hash of the claim at confirmation time. A claim edit that does not go
-   * through an explicit re-confirm must not silently retarget the job.
-   */
-  claim_lock: z.string().min(1),
-  /** Phrases pulled from the claim and artifacts. Sharpen over time. */
-  fingerprints: z.array(z.string()).default([]),
-  /** If one of these appears, it is the same niche regardless of score. */
+  fingerprints: z.array(z.string()),
   must_match: z.array(z.string()).default([]),
-  /** Adjacent things that are not them. Grows every time they mute a hit. */
   ignore: z.array(z.string()).default([]),
-  /** Which lanes ran for this project. */
-  sources: z.array(z.string()).default([]),
-  /** First-look hit ids, so the second run is a diff. */
+  sources: z.array(z.string()).default(["search", "watch"]),
   baseline_ids: z.array(z.string()).default([]),
-  geo: z
-    .object({ country: z.string().optional(), language: z.string().optional() })
-    .default({}),
-  budget: BudgetSchema.default({
-    cap_page_loads: 500,
-    spent_page_loads: 0,
-    lane: "cheap",
-  }),
-  alert_email: z.string().email().nullable().default(null),
-  digest_floor: z.enum(["daily", "weekly"]).default("weekly"),
+  github_url: z.string().optional(),
+  patent_number: z.string().optional(),
+  links: z.array(z.string()).default([]),
+  watch_list: z.array(z.string()).default([]),
+  tingle_on: z.boolean().default(false),
+  alert_email: z.string().email().optional(),
+  digest_floor: DigestFloorSchema.default("daily"),
+  budget: BudgetSchema.default(DEFAULT_BUDGET),
+  paused: z.boolean().default(false),
   stealth: z.boolean().default(false),
   storage: z.enum(["vault", "github"]).default("vault"),
-  created_at: z.string(),
-  updated_at: z.string(),
+  github_repo: z.string().optional(),
+  geo: GeoSchema.optional(),
 });
-
 export type WatchProfile = z.infer<typeof WatchProfileSchema>;
-
-/** What the builder handed us. Minimum: one toggle on, with something in it. */
-export const ProjectInputSchema = z
-  .object({
-    stage: StageSchema,
-    /** Free text, in their words. */
-    pitch: z.string().optional(),
-    /** Already-extracted document text. Files are read, never scraped. */
-    docs: z
-      .array(z.object({ name: z.string(), text: z.string() }))
-      .default([]),
-    /** Product pages, papers, known competitors. */
-    links: z.array(z.string().url()).default([]),
-    /** Repo url. Read over the public REST API, not scraped. */
-    github_repo: z.string().optional(),
-    /** Extra sites or names to watch. */
-    watch_list: z.array(z.string()).default([]),
-    /** An existing filing id, so nobody has to upload a PDF. */
-    patent_number: z.string().optional(),
-    /** "Looks like us, is not." */
-    ignore: z.array(z.string()).default([]),
-    country: z.string().optional(),
-  })
-  .refine(
-    (v) =>
-      Boolean(v.pitch?.trim()) ||
-      v.docs.length > 0 ||
-      v.links.length > 0 ||
-      Boolean(v.github_repo?.trim()) ||
-      Boolean(v.patent_number?.trim()),
-    {
-      message:
-        "at least one input needs content — pitch, docs, links, a repo, or a patent number",
-    },
-  );
-
-export type ProjectInput = z.infer<typeof ProjectInputSchema>;

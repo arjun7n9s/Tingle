@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tingle chaos board — launches in the lane</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1020;
+        --panel: #121a2f;
+        --line: #243152;
+        --text: #e8eefc;
+        --muted: #9aa8c7;
+        --accent: #3dff9a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #182445, var(--bg));
+        color: var(--text);
+        padding: 2.5rem 1.5rem;
+      }
+      main { width: min(720px, 100%); margin: 0 auto; }
+      h1 { margin: 0 0 0.35rem; font-size: 1.5rem; letter-spacing: -0.02em; }
+      .board-meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.75rem; }
+      .hit-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 1.15rem 1.35rem;
+        margin-bottom: 1rem;
+      }
+      a.product-link { text-decoration: none; color: inherit; }
+      a.product-link:hover .product-heading { color: var(--accent); }
+      .product-heading { margin: 0 0 0.4rem; font-size: 1.15rem; letter-spacing: -0.01em; }
+      .tagline-text { margin: 0 0 0.65rem; color: var(--text); line-height: 1.5; }
+      .launch-day {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 0.8rem;
+        color: var(--accent);
+      }
+      footer { margin-top: 2rem; font-size: 0.8rem; color: var(--muted); line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <!--
+      BROKEN VARIANT — the "site redesign" for the heal proof.
+
+      Same content, same .hit-card row wrapper, renamed field selectors:
+        .claim-title  → .product-heading
+        a.hit         → a.product-link
+        .hit-snippet  → .tagline-text
+        .hit-date     → .launch-day
+
+      Rows are still discoverable, so the collector returns the right number of
+      rows with empty required fields. That yields per-field Zod issues, which
+      is what buildHealPrompt turns into a precise heal request.
+
+      Copy this over index.html and redeploy to stage the break.
+    -->
+    <main>
+      <h1>Chaos Board</h1>
+      <p class="board-meta">
+        Controlled launch-board fixture for Bright Data Scraper Studio heal
+        demos. Same row shape as the Uneed watch collector, so a break here
+        exercises the real pipeline. Public page, no login, synthetic data.
+      </p>
+
+      <article class="hit-card">
+        <a class="product-link" href="https://chaos.example/launch/claimwatch">
+          <h2 class="product-heading">ClaimWatch</h2>
+        </a>
+        <p class="tagline-text">
+          Tells solo builders when somebody else ships the thing they are
+          halfway through building. Watches launch boards and release notes.
+        </p>
+        <time class="launch-day" datetime="2026-08-20">2026-08-20</time>
+      </article>
+
+      <article class="hit-card">
+        <a class="product-link" href="https://chaos.example/launch/priorart-radar">
+          <h2 class="product-heading">PriorArt Radar</h2>
+        </a>
+        <p class="tagline-text">
+          Weekly digest of new filings and preprints that match a saved
+          one-sentence description of your project.
+        </p>
+        <time class="launch-day" datetime="2026-08-18">2026-08-18</time>
+      </article>
+
+      <article class="hit-card">
+        <a class="product-link" href="https://chaos.example/launch/nichefill">
+          <h2 class="product-heading">NicheFill</h2>
+        </a>
+        <p class="tagline-text">
+          Directory of indie products grouped by the job they do, updated
+          daily from public launch pages.
+        </p>
+        <time class="launch-day" datetime="2026-08-11">2026-08-11</time>
+      </article>
+
+      <article class="hit-card">
+        <a class="product-link" href="https://chaos.example/launch/scrapekeeper">
+          <h2 class="product-heading">ScrapeKeeper</h2>
+        </a>
+        <p class="tagline-text">
+          Hosted extractors that repair their own selectors when a target
+          site redesigns, so downstream pipelines keep the same collector id.
+        </p>
+        <time class="launch-day" datetime="2026-07-29">2026-07-29</time>
+      </article>
+
+      <footer>
+        Synthetic fixture. Every product name and link on this page is made up
+        for testing a scraper; none of them are real companies. Edit the
+        selectors on purpose to prove self-healing.
+      </footer>
+    </main>
+  </body>
+</html>

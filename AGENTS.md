@@ -15,8 +15,8 @@ Two jobs, always: what already exists that they should build on, and what
 
 ## Build order
 
-The extractor spine lands before any product UI. A pretty app on top of a
-collector that silently returns nothing is worse than no app.
+The build order (extractor first, then claim JSON, then product, then watch,
+then vault, then dedup) is done through Phase 6. Phase 7 is the demo pack.
 
 1. Own the collectors, validate their output, heal them in place, trigger from
    code.
@@ -24,8 +24,7 @@ collector that silently returns nothing is worse than no app.
 3. Product shell on top of that JSON.
 4. The watch loop: schedule, diff, classify, urgency, email.
 5. Encrypted storage, dedup, mute, claim lock.
-
-Do not build step 3 before step 1 has a real collector id.
+6. Proof artifacts, clone README, demo script, optional CI heal.
 
 ## Hard rules
 
@@ -35,6 +34,19 @@ Do not build step 3 before step 1 has a real collector id.
    Check `.env` for `TINGLE_C_SEARCH`, `TINGLE_C_WATCH`, `TINGLE_C_CHAOS`
    first. Creating takes 5-25 minutes, costs credits, and a new id orphans
    every downstream pointer.
+
+   Pinned on this workspace — do not create again, do not swap ids:
+
+   | Env | Id | Type / target |
+   |---|---|---|
+   | `TINGLE_C_SEARCH` | `c_mt3k9kgdv5dj23xxd` | Discovery, https://dev.to/t/indiehackers |
+   | `TINGLE_C_WATCH` | `c_mt3jjp0qjjjt1thr3` | Discovery, https://www.uneed.best/ |
+   | `TINGLE_C_CHAOS` | `c_mt3jbbz21pal4p4vgp` | Discovery, chaos fixture |
+
+   Inactive duplicate Search `c_mt3jjqpa1vbu522epb` — leave it. A clone pastes
+   its own ids into `.env`; it must not run `create` for these three targets.
+   Extra user URLs reuse Watch. SERP/Unlocker are adjuncts — never a fourth
+   Studio collector for a pasted page.
 2. Heal repairs **in place**. The collector id is identical before and after —
    that is the entire reliability story. `refactor_template` → poll progress →
    `resume_automation_job`.

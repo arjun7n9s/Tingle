@@ -14,6 +14,9 @@ bdata budget                                  # confirms auth works
 
 ## Before you create anything
 
+- **Already pinned?** If `.env` has real `c_*` ids, stop. The prompts below are
+  for a clone that has never created collectors. This repo's ids are in
+  [AGENTS.md](../AGENTS.md).
 - **Is the target long-tail?** If a maintained pre-built extractor already
   covers the site, owning selectors for it teaches you nothing and the target
   is the wrong choice. Pick something no one maintains for you.
@@ -43,12 +46,14 @@ The long-tail target: a public launch board, changelog, docs index, or niche
 directory whose entries carry dates. Dates are what make the "shipped in the
 last 7 days" pile and the baseline diff possible.
 
+**Locked here:** Discovery on https://www.uneed.best/
+
 ```bash
-bdata scraper create "<watch url>" \
-  "Scraper type: Sitemap. Extract every listed item as a row with these exact
-   field names: title, url, snippet, published_at, source_domain. published_at
-   is an ISO date or null. Use plain-language extraction so self-healing can
-   repair selectors later. Public pages only." \
+bdata scraper create "https://www.uneed.best/" \
+  "Scraper type: Discovery. Extract every listed launch as a row with these
+   exact field names: title, url, snippet, published_at, source_domain.
+   published_at is an ISO date or null. Use plain-language extraction so
+   self-healing can repair selectors later. Public pages only." \
   --name tingle-watch -o watch-create.json
 ```
 
@@ -56,32 +61,26 @@ Put the returned id in `TINGLE_C_WATCH` and the target in `TINGLE_WATCH_URL`.
 
 ## 2. Search collector
 
-Keyword-driven, for a pitch-only first look where there is no URL to start from.
+A **fixed public listing**, not a site search box. `/search?q=` endpoints are
+near-universally disallowed in robots.txt or render results client-side, so
+Studio has no DOM to learn from. The claim is matched against listing rows in
+our code after the scrape.
 
-Note the constraint: `scraper create` requires a URL positional, so a
-keyword-only collector cannot be created from the CLI alone. Two workable
-shapes:
+**Locked here:** Discovery on https://dev.to/t/indiehackers
 
-- **Search-results URL.** Create against a long-tail site's own search page,
-  then set `TINGLE_SEARCH_URL_TEMPLATE` with `{q}` where the query goes. The
-  code interpolates the claim and sends `{ url }`.
-- **Keyword input.** If the collector is built to take a keyword input
-  directly, leave the template unset and the code sends
-  `{ keyword, country }` instead.
-
-`packages/tingle-core` supports both without a code change — the client passes
-whatever input shape the collector expects.
+`TINGLE_SEARCH_URL_TEMPLATE` with `{q}` is unused for this collector. Leave it
+unset.
 
 ```bash
-bdata scraper create "<search results url for a representative query>" \
-  "Scraper type: Search. Extract each result as a row with these exact field
-   names: title, url, snippet, published_at, source_domain. published_at is an
-   ISO date or null. Plain-language extraction. Public pages only." \
+bdata scraper create "https://dev.to/t/indiehackers" \
+  "Scraper type: Discovery. Extract each post on the listing as a row with
+   these exact field names: title, url, snippet, published_at, source_domain.
+   published_at is an ISO date or null. Plain-language extraction. Public
+   pages only." \
   --name tingle-search -o search-create.json
 ```
 
-Set `TINGLE_C_SEARCH`, and `TINGLE_SEARCH_URL_TEMPLATE` if you took the first
-shape.
+Set `TINGLE_C_SEARCH` and `TINGLE_SEARCH_URL`.
 
 ## 3. Chaos collector
 

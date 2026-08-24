@@ -4,15 +4,23 @@
   "version": "0.1.0",
   "description": "A claim watch for builders — first look at the public web, then keep watching",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "web-ui"
   ],
   "scripts": {
     "build": "npm run build -w @tingle/core",
     "typecheck": "npm run typecheck -w @tingle/core",
     "prove:tingle-live": "npm run prove:live -w @tingle/core",
     "prove:tingle-heal": "npm run prove:heal -w @tingle/core",
+    "prove:tingle-shell": "npm run prove:shell -w @tingle/core",
+    "prove:tingle-loop": "npm run prove:loop -w @tingle/core",
+    "prove:tingle-vault": "npm run prove:vault -w @tingle/core",
+    "prove:tingle-dedup": "npm run prove:dedup -w @tingle/core",
+    "prove:tingle-watchdog": "npm run prove:watchdog -w @tingle/core",
     "first-look": "npm run first-look -w @tingle/core --",
-    "serve": "npm run serve -w @tingle/core"
+    "api": "npm run api -w @tingle/core",
+    "dev:ui": "npm run dev -w @tingle/web-ui",
+    "test": "npm run test -w @tingle/core"
   },
   "engines": {
     "node": ">=20"

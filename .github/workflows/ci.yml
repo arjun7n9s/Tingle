@@ -1,0 +1,26 @@
+name: Mock proofs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    env:
+      TINGLE_MOCK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run prove:tingle-shell
+      - run: npm run prove:tingle-loop
+      - run: npm run prove:tingle-vault
+      - run: npm run prove:tingle-dedup
+      - run: npm run prove:tingle-heal

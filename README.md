@@ -67,7 +67,8 @@ Mock is for development. It is not evidence that a live collector works.
 ## Running it
 
 ```bash
-npm run serve          # http://127.0.0.1:8788
+npm run api            # Tingle API — http://127.0.0.1:8788
+npm run dev:ui         # Next app — http://localhost:3000 (redirects to /tingle)
 npm run first-look request.json   # same pipeline, no browser
 ```
 
@@ -117,13 +118,14 @@ entirely synthetic — every name and link on it is invented for testing.
 |---|---|
 | `packages/tingle-core/src/schema` | `HitRow` and heal-event schemas — the frozen field contract |
 | `packages/tingle-core/src/bd` | Scraper Studio client, validation gate, heal loop |
-| `packages/tingle-core/src/scripts` | `prove:tingle-live`, `prove:tingle-heal` |
+| `packages/tingle-core/src/scripts` | `prove:tingle-live`, `prove:tingle-heal`, watchdog |
+| `web-ui` | Tingle Next app (`/tingle`) |
 | `fixtures/tingle-chaos` | Breakable fixture, served over GitHub Pages |
 | `docs/collectors.md` | Creating and pinning the three collectors |
 | `AGENTS.md` | Rules for coding agents working in this repo |
 
 ## Status
 
-Early. The extractor spine is the current focus; the product surface — claim
-confirmation, the three piles, the watch loop, email — comes after it, and
-deliberately not before.
+Claim watch is live in this repo: first look, piles, patent/SERP adjuncts,
+watchdog ticks, and the `/tingle` UI. Changelog Radar is a **separate**
+project and does not belong in this tree.

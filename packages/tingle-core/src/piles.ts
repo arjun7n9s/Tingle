@@ -1,270 +1,305 @@
 import { createHash } from "node:crypto";
-import { normalizeText, tokenize, type Fingerprints } from "./claim.js";
-import { isWithinDays, parseListingDate } from "./dates.js";
-import { domainFromUrl, type HitRow } from "./schema/hits.js";
+import { isClaimRelevant, isContentFingerprint, scoreAgainstClaim } from "./claim.js";
 
-export type EnrichedHit = HitRow & {
-  /** Stable across runs, so the second run is a diff and not a reprint. */
+export type PileableHit = {
+  source: string;
+  title: string;
+  url: string;
+  snippet: string;
+  published_at: string | null;
+  source_domain: string;
+  collector?: string;
+  region?: string;
+  office?: string;
+  /** False = foreign board / office (fast tracker). */
+  home?: boolean;
+  /** Lexical/LLM overlap vs the confirmed claim. Adjunct scoring only. */
+  overlap_score?: number;
+};
+
+export const PILE_KEYS = [
+  "stand_on_this",
+  "local_lane",
+  "already_in_the_lane",
+  "fast_tracker",
+  "shipped_last_7_days",
+  "patent_landscape",
+  "patent_threats",
+  "prior_art_papers",
+  "regional_discovered",
+] as const;
+export type PileKey = (typeof PILE_KEYS)[number];
+
+export type PileHit = PileableHit & {
   id: string;
-  /** Which lane produced this row. */
-  origin: string;
-  /** Detects "this page changed" for the baseline. */
+  why: string;
+  collector: string;
   content_hash: string;
-  /** Normalised date, plus how confidently it was read. */
-  published_iso: string | null;
-  date_precision: "exact" | "inferred-year" | "unparsed";
+  entity_key: string;
+  days_old: number | null;
+  relevance?: "same_invention" | "related_art";
 };
 
-export type ScoredHit = EnrichedHit & {
-  score: number;
-  matched: string[];
-  /** Why it landed in its pile, in plain language. */
-  reason: string;
-  /** Set when a Stand-on-this row is also inside the recency window. */
-  also_recent?: boolean;
-};
+export type Piles = Record<PileKey, PileHit[]>;
 
-export type Piles = {
-  stand_on_this: ScoredHit[];
-  already_in_the_lane: ScoredHit[];
-  shipped_last_7_days: ScoredHit[];
-};
+/** Labels the judge may stamp. Piles keep only the first two. */
+export type PileRelevance =
+  | "same_invention"
+  | "related_art"
+  | "setting_only"
+  | "unrelated";
 
-export type PileResult = {
-  piles: Piles;
-  /** Everything excluded, and why. An unexplained drop is indistinguishable
-   *  from a scraper that never returned the row. */
-  filtered: Array<{ url: string; title: string; why: string }>;
-  quality: {
-    hits_in: number;
-    kept: number;
-    below_threshold: number;
-    ignored: number;
-    undated: number;
-  };
-};
-
-export function hitId(origin: string, url: string): string {
-  return createHash("sha256").update(`${origin}|${url}`).digest("hex").slice(0, 16);
-}
-
-export function contentHash(row: Pick<HitRow, "title" | "snippet">): string {
-  return createHash("sha256")
-    .update(`${normalizeText(row.title)}|${normalizeText(row.snippet)}`)
-    .digest("hex")
-    .slice(0, 16);
-}
-
-export function enrichHit(row: HitRow, origin: string, now: Date): EnrichedHit {
-  const parsed = parseListingDate(row.published_at, now);
-  return {
-    ...row,
-    id: hitId(origin, row.url),
-    origin,
-    content_hash: contentHash(row),
-    published_iso: parsed.iso,
-    date_precision: parsed.precision,
-  };
-}
-
-/**
- * Signals that a hit is something to build on rather than compete with.
- *
- * Tuned for precision over recall, per the spec: a wrong "stand on this" tells
- * someone to adopt a competitor, which is worse than omitting a real library.
- */
-const REUSABLE_HOSTS = new Set([
-  "arxiv.org","github.com","gitlab.com","codeberg.org","npmjs.com",
-  "pypi.org","crates.io","packagist.org","rubygems.org","huggingface.co",
-]);
-const REUSABLE_WORDS =
-  /\b(library|framework|sdk|open[-\s]?source|package|toolkit|boilerplate|starter|preprint|paper|specification|rfc)\b/i;
-
-function looksReusable(hit: EnrichedHit): boolean {
-  const host = domainFromUrl(hit.url);
-  if (REUSABLE_HOSTS.has(host)) return true;
-  if (/(^|\.)docs\./.test(host)) return true;
-  if (/\/(docs|documentation)(\/|$)/.test(hit.url)) return true;
-  if (/\/abs\//.test(hit.url)) return true;
-  return REUSABLE_WORDS.test(`${hit.title} ${hit.snippet}`);
-}
-
-/**
- * Score a hit against the claim's fingerprints.
- *
- * Two-word phrases are worth far more than single terms — "refund rate" places
- * something in a niche where "rate" on its own places nothing. A hit needs a
- * phrase, or several distinct terms, to clear the threshold.
- */
-export function scoreHit(
-  hit: Pick<HitRow, "title" | "snippet">,
-  fp: Fingerprints,
-): { score: number; matched: string[] } {
-  const haystack = normalizeText(`${hit.title} ${hit.snippet}`);
-  const tokens = new Set(tokenize(`${hit.title} ${hit.snippet}`));
-  const matched: string[] = [];
-  let score = 0;
-
-  for (const phrase of fp.phrases) {
-    if (haystack.includes(phrase)) {
-      score += 3;
-      matched.push(phrase);
-    }
-  }
-  for (const term of fp.terms) {
-    if (tokens.has(term)) {
-      score += 1;
-      matched.push(term);
-    }
-  }
-  return { score, matched };
-}
-
-export type PileOptions = {
-  now?: Date;
-  /** Minimum score to appear at all. One phrase, or two distinct terms. */
-  minScore?: number;
-  recencyDays?: number;
-  mustMatch?: string[];
+export type PileInput = {
+  fingerprints: string[];
+  must_match?: string[];
   ignore?: string[];
+  now?: Date;
+  /** When set, piles skip lexical isClaimRelevant and keep judged keepers only. */
+  judged?: Record<string, PileRelevance>;
+  /** Patent rows at or above this overlap go on patent_threats. Default 0.6. */
+  overlap_min?: number;
 };
 
-function isIgnored(hit: EnrichedHit, ignore: string[]): string | null {
-  const host = domainFromUrl(hit.url);
-  const url = hit.url.toLowerCase();
-  const title = normalizeText(hit.title);
-  for (const raw of ignore) {
-    const needle = raw.trim().toLowerCase();
-    if (!needle) continue;
-    if (host === needle || host.endsWith(`.${needle}`)) return raw;
-    if (url.includes(needle)) return raw;
-    if (title.includes(normalizeText(needle))) return raw;
+const STAND_HOSTS = new Set([
+  "arxiv.org",
+  "export.arxiv.org",
+  "github.com",
+  "gitlab.com",
+  "npmjs.com",
+  "pypi.org",
+  "crates.io",
+  "docs.rs",
+  "readthedocs.io",
+  "openalex.org",
+  "doi.org",
+  "crossref.org",
+]);
+
+const PATENT_HOSTS = new Set([
+  "patents.google.com",
+  "patentscope.wipo.int",
+  "worldwide.espacenet.com",
+  "uspto.gov",
+  "ppubs.uspto.gov",
+  "epo.org",
+  "j-platpat.inpit.go.jp",
+  "kipris.or.kr",
+  "cnipa.gov.cn",
+  "ip2.sg",
+  "fips.ru",
+]);
+
+const STAND_TITLE =
+  /\b(library|sdk|api|framework|docs?|documentation|paper|preprint|dataset|toolkit|engine|parser|package)\b/i;
+
+export function hitId(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+}
+
+export function contentHash(hit: Pick<PileableHit, "title" | "url" | "snippet">): string {
+  return createHash("sha256")
+    .update(`${hit.url}\n${hit.title}\n${hit.snippet}`)
+    .digest("hex");
+}
+
+export function entityKey(hit: Pick<PileableHit, "title" | "url">): string {
+  const host = (() => {
+    try {
+      return new URL(hit.url).hostname.replace(/^www\./, "");
+    } catch {
+      return hit.url;
+    }
+  })();
+  const name = hit.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return `${host}::${name}`;
+}
+
+export function daysSince(publishedAt: string | null, now: Date): number | null {
+  if (!publishedAt) return null;
+  const t = Date.parse(publishedAt);
+  if (Number.isNaN(t)) return null;
+  return (now.getTime() - t) / 86_400_000;
+}
+
+function hostOf(hit: PileableHit): string {
+  return hit.source_domain.replace(/^www\./, "");
+}
+
+function isPatentHit(hit: PileableHit): boolean {
+  if (hit.source === "patent" || hit.office) return true;
+  return PATENT_HOSTS.has(hostOf(hit));
+}
+
+function isStandOn(hit: PileableHit): boolean {
+  if (isPatentHit(hit)) return false;
+  if (STAND_HOSTS.has(hostOf(hit))) return true;
+  if (hit.source === "search" && /github\.com/i.test(hit.url)) return true;
+  return STAND_TITLE.test(`${hit.title} ${hit.snippet}`);
+}
+
+function isForeign(hit: PileableHit): boolean {
+  return hit.home === false;
+}
+
+function isPaperHit(hit: PileableHit): boolean {
+  if (isPatentHit(hit)) return false;
+  return /arxiv|openalex|doi\.org|crossref/i.test(
+    `${hit.source} ${hit.source_domain} ${hit.url}`,
+  );
+}
+
+function isRegionalEngine(region: string | undefined): boolean {
+  return /^(yandex|baidu|naver)$/i.test(region ?? "");
+}
+
+export function mergeHits(
+  into: PileableHit[],
+  extra: PileableHit[],
+): PileableHit[] {
+  const seen = new Set(into.map((h) => h.url));
+  for (const hit of extra) {
+    if (seen.has(hit.url)) continue;
+    seen.add(hit.url);
+    into.push(hit);
   }
-  return null;
+  return into;
+}
+
+export function allPileHits(piles: Piles): PileHit[] {
+  return PILE_KEYS.flatMap((k) => piles[k]);
 }
 
 /**
- * Sort hits into the three piles.
- *
- * No model runs here. The piles are a pure function of collector output plus
- * the claim's fingerprints, which is why nothing can appear in a pile that was
- * not in the JSON — it is structurally impossible rather than a promise.
+ * Map validated hits into the three piles. Search/Watch listings are ranked
+ * against the claim here — we do not interpolate `{q}` into the collector.
+ * Empty piles are allowed; they are not filled from model memory.
  */
-export function buildPiles(
-  hits: EnrichedHit[],
-  fp: Fingerprints,
-  opts: PileOptions = {},
-): PileResult {
-  const now = opts.now ?? new Date();
-  const minScore = opts.minScore ?? 3;
-  const recencyDays = opts.recencyDays ?? 7;
-  const mustMatch = (opts.mustMatch ?? []).map((m) => normalizeText(m)).filter(Boolean);
-  const ignore = opts.ignore ?? [];
+export function mapHitsToPiles(
+  hits: PileableHit[],
+  input: PileInput,
+): Piles {
+  const now = input.now ?? new Date();
+  const piles: Piles = emptyPiles();
+  const overlapMin = input.overlap_min ?? 0.6;
 
-  const piles: Piles = {
-    stand_on_this: [],
-    already_in_the_lane: [],
-    shipped_last_7_days: [],
-  };
-  const filtered: PileResult["filtered"] = [];
-  let ignored = 0;
-  let below = 0;
-  let undated = 0;
+  const KEEP = new Set<PileRelevance>(["same_invention", "related_art"]);
 
   for (const hit of hits) {
-    if (hit.date_precision === "unparsed") undated += 1;
-
-    const ignoredBy = isIgnored(hit, ignore);
-    if (ignoredBy) {
-      ignored += 1;
-      filtered.push({ url: hit.url, title: hit.title, why: `muted by "${ignoredBy}"` });
+    const judgedLabel = input.judged?.[hit.url];
+    if (input.judged) {
+      if (!judgedLabel || !KEEP.has(judgedLabel)) continue;
+    } else if (
+      !isClaimRelevant(
+        hit,
+        input.fingerprints,
+        input.must_match ?? [],
+        input.ignore ?? [],
+      )
+    ) {
       continue;
     }
 
-    const { score, matched } = scoreHit(hit, fp);
-    const haystack = normalizeText(`${hit.title} ${hit.snippet}`);
-    const forced = mustMatch.find((m) => haystack.includes(m));
-
-    if (!forced && score < minScore) {
-      below += 1;
-      filtered.push({
-        url: hit.url,
-        title: hit.title,
-        why: `score ${score} below threshold ${minScore}`,
-      });
-      continue;
-    }
-
-    const recent = isWithinDays(hit.published_iso, now, recencyDays);
-    const base: ScoredHit = {
+    const age = daysSince(hit.published_at, now);
+    const keepLabel =
+      judgedLabel === "same_invention" || judgedLabel === "related_art"
+        ? judgedLabel
+        : undefined;
+    const piled: PileHit = {
       ...hit,
-      score: forced ? Math.max(score, minScore) : score,
-      matched: forced ? [...matched, `must_match:${forced}`] : matched,
-      reason: "",
+      id: hitId(hit.url),
+      why: why(hit, age, input.fingerprints, keepLabel),
+      collector: hit.source,
+      content_hash: contentHash(hit),
+      entity_key: entityKey(hit),
+      days_old: age,
+      relevance: keepLabel,
     };
 
-    // Kind wins over recency, so a brand-new library is still something to
-    // build on rather than a competitor alarm. `also_recent` keeps that
-    // visible instead of hiding it.
-    if (looksReusable(hit)) {
-      piles.stand_on_this.push({
-        ...base,
-        also_recent: recent || undefined,
-        reason: matched.length
-          ? `reusable source matching ${matched.slice(0, 3).join(", ")}`
-          : "reusable source in the claim's area",
-      });
-    } else if (recent) {
-      piles.shipped_last_7_days.push({
-        ...base,
-        reason: `published ${hit.published_iso?.slice(0, 10)}${
-          hit.date_precision === "inferred-year" ? " (year inferred)" : ""
-        }`,
-      });
+    if (isPatentHit(hit)) {
+      piles.patent_landscape.push(piled);
+      if ((hit.overlap_score ?? 0) >= overlapMin) {
+        piles.patent_threats.push(piled);
+      }
+    } else if (isPaperHit(hit)) {
+      piles.prior_art_papers.push(piled);
+      if (!(age !== null && age >= 0 && age <= 7)) {
+        piles.stand_on_this.push(piled);
+      }
+    } else if (isStandOn(hit) && !(age !== null && age >= 0 && age <= 7)) {
+      piles.stand_on_this.push(piled);
+    } else if (isForeign(hit)) {
+      piles.fast_tracker.push(piled);
+      if (isRegionalEngine(hit.region)) {
+        piles.regional_discovered.push(piled);
+      }
+    } else if (age !== null && age >= 0 && age <= 7) {
+      piles.shipped_last_7_days.push(piled);
     } else {
-      piles.already_in_the_lane.push({
-        ...base,
-        reason: matched.length
-          ? `same job, matching ${matched.slice(0, 3).join(", ")}`
-          : "same job",
-      });
+      piles.local_lane.push(piled);
+      piles.already_in_the_lane.push(piled);
     }
   }
 
-  for (const key of Object.keys(piles) as Array<keyof Piles>) {
-    piles[key].sort((a, b) => b.score - a.score);
+  piles.patent_threats.sort(
+    (a, b) => (b.overlap_score ?? 0) - (a.overlap_score ?? 0),
+  );
+  return piles;
+}
+
+function why(
+  hit: PileableHit,
+  age: number | null,
+  fingerprints: string[],
+  label?: "same_invention" | "related_art",
+): string {
+  const { matched } = scoreAgainstClaim(
+    `${hit.title} ${hit.snippet} ${hit.url}`,
+    fingerprints,
+  );
+  const overlap = matched.filter(isContentFingerprint).slice(0, 4);
+  const judged = label
+    ? ` Judged ${label.replaceAll("_", " ")}.`
+    : "";
+  const bits = overlap.length ? ` Overlap: ${overlap.join(", ")}.` : "";
+  if (isPatentHit(hit)) {
+    return `Patent-office row (${hit.office ?? hit.source_domain}).${judged}${bits}`;
   }
+  if (isStandOn(hit)) {
+    return `Looks like existing work to reuse (${hit.source_domain}).${judged}${bits}`;
+  }
+  if (isForeign(hit)) {
+    return `Shipping in another region (${hit.region ?? hit.source_domain}).${judged}${bits}`;
+  }
+  if (age !== null && age >= 0 && age <= 7) {
+    return `published_at ${hit.published_at} is within the last 7 days.${judged}${bits}`;
+  }
+  return `Public row that passed claim matching, from ${hit.source}.${judged}${bits}`;
+}
 
-  const kept =
-    piles.stand_on_this.length +
-    piles.already_in_the_lane.length +
-    piles.shipped_last_7_days.length;
-
+export function emptyPiles(): Piles {
   return {
-    piles,
-    filtered,
-    quality: {
-      hits_in: hits.length,
-      kept,
-      below_threshold: below,
-      ignored,
-      undated,
-    },
+    stand_on_this: [],
+    local_lane: [],
+    already_in_the_lane: [],
+    fast_tracker: [],
+    shipped_last_7_days: [],
+    patent_landscape: [],
+    patent_threats: [],
+    prior_art_papers: [],
+    regional_discovered: [],
   };
 }
 
-/** Honest label for a pile, including when it is empty. */
-export function pileLabel(key: keyof Piles, count: number): string {
-  const names: Record<keyof Piles, string> = {
-    stand_on_this: "Stand on this",
-    already_in_the_lane: "Already in the lane",
-    shipped_last_7_days: "Shipped in the last 7 days",
+export function pileCounts(piles: Piles): Record<PileKey, number> {
+  return {
+    stand_on_this: piles.stand_on_this.length,
+    local_lane: piles.local_lane.length,
+    already_in_the_lane: piles.already_in_the_lane.length,
+    fast_tracker: piles.fast_tracker.length,
+    shipped_last_7_days: piles.shipped_last_7_days.length,
+    patent_landscape: piles.patent_landscape.length,
+    patent_threats: piles.patent_threats.length,
+    prior_art_papers: piles.prior_art_papers.length,
+    regional_discovered: piles.regional_discovered.length,
   };
-  if (count > 0) return `${names[key]} (${count})`;
-  const empty: Record<keyof Piles, string> = {
-    stand_on_this: "Stand on this — nothing the collectors returned looks reusable",
-    already_in_the_lane: "Already in the lane — nothing returned matched the claim",
-    shipped_last_7_days: "Shipped in the last 7 days — nothing dated inside the window",
-  };
-  return empty[key];
 }

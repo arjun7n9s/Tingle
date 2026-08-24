@@ -1,0 +1,58 @@
+{
+  "idle": {
+    "src": "/tingle/spidey/idle.png",
+    "frames": 10,
+    "w": 117,
+    "h": 99,
+    "ms": 90
+  },
+  "punch": {
+    "src": "/tingle/spidey/punch.png",
+    "frames": 13,
+    "w": 156,
+    "h": 117,
+    "ms": 70
+  },
+  "flip": {
+    "src": "/tingle/spidey/flip.png",
+    "frames": 7,
+    "w": 174,
+    "h": 119,
+    "ms": 80
+  },
+  "web": {
+    "src": "/tingle/spidey/web.png",
+    "frames": 13,
+    "w": 158,
+    "h": 83,
+    "ms": 75
+  },
+  "lunge": {
+    "src": "/tingle/spidey/lunge.png",
+    "frames": 12,
+    "w": 127,
+    "h": 96,
+    "ms": 70
+  },
+  "shot": {
+    "src": "/tingle/spidey/shot.png",
+    "frames": 6,
+    "w": 121,
+    "h": 79,
+    "ms": 90
+  },
+  "spin": {
+    "src": "/tingle/spidey/spin.png",
+    "frames": 10,
+    "w": 140,
+    "h": 96,
+    "ms": 55
+  },
+  "ready": {
+    "src": "/tingle/spidey/ready.png",
+    "frames": 6,
+    "w": 100,
+    "h": 76,
+    "ms": 110
+  }
+}

@@ -3,123 +3,76 @@ import {
   normalizeRow,
   type HitRow,
   type HitSource,
-  type NormalizeOptions,
 } from "../schema/hits.js";
-
-export type IssueDetail = { row: number; path: string; message: string };
 
 export type ValidationResult = {
   ok: HitRow[];
-  /** Human-readable, one line per row+field. For logs and artifacts. */
   issues: string[];
-  /** Structured form, so the heal prompt can group instead of string-parse. */
-  issueDetails: IssueDetail[];
-  /** Rows that arrived but failed the schema. Never treated as success. */
-  rejected: number;
 };
 
 /**
- * The tripwire. Runs the alias layer first, then the schema.
- *
- * Zero rows is itself an issue — a collector that returns nothing looks
- * identical to an empty niche, and that is the false negative this product
- * cannot afford.
+ * Zod is the tripwire. Empty dataset and empty required fields are incidents,
+ * not "nothing in the niche." Invalid rows are never returned as success.
  */
 export function validateRows(
   source: HitSource,
   rows: unknown[],
-  opts: NormalizeOptions = {},
 ): ValidationResult {
   const ok: HitRow[] = [];
   const issues: string[] = [];
-  const issueDetails: IssueDetail[] = [];
-  let rejected = 0;
-
   if (!rows.length) {
-    return {
-      ok,
-      issues: ["empty dataset — collector returned 0 rows"],
-      issueDetails: [
-        { row: -1, path: "(dataset)", message: "collector returned 0 rows" },
-      ],
-      rejected: 0,
-    };
+    issues.push("empty dataset — extractor likely broken, not an empty niche");
+    return { ok, issues };
   }
-
   for (const [i, row] of rows.entries()) {
-    const parsed = HitRowSchema.safeParse(normalizeRow(source, row, opts));
+    const parsed = HitRowSchema.safeParse(normalizeRow(source, row));
     if (parsed.success) {
       ok.push(parsed.data);
-      continue;
-    }
-    rejected += 1;
-    for (const issue of parsed.error.issues) {
-      const path = issue.path.join(".") || "(root)";
-      issues.push(`[row ${i}] ${path}: ${issue.message}`);
-      issueDetails.push({ row: i, path, message: issue.message });
+    } else {
+      for (const issue of parsed.error.issues) {
+        const path = issue.path.length ? issue.path.join(".") : "row";
+        issues.push(`[${i}] ${path}: ${issue.message}`);
+      }
     }
   }
-
-  return { ok, issues, issueDetails, rejected };
+  return { ok, issues };
 }
-
-/** Fields the heal prompt must always name, so a repair cannot rename them. */
-const FROZEN_FIELDS =
-  "title, url, snippet, published_at, source_domain";
 
 /**
- * Build the heal prompt from the actual validation issues.
- *
- * A vague prompt ("it broke") invites a rewrite of the whole scraper. An
- * issue-derived prompt repairs selectors.
- *
- * Issues are grouped by field, not listed per row. A break usually hits the
- * same field on every row, and spelling that out sixteen times burns the
- * 1000-character cap saying four things — which then truncates the part that
- * actually constrains the repair.
+ * Heal prompts name the frozen HitRow fields. Bright Data caps the body at
+ * 1000 characters; we clip here so the client does not have to.
  */
-export function buildHealPrompt(
-  source: HitSource,
-  issues: IssueDetail[],
-  opts: { maxChars?: number; totalRows?: number } = {},
-): string {
-  const maxChars = opts.maxChars ?? 1000;
-
-  const head =
-    `The ${source} collector failed schema validation, most likely after a ` +
-    `layout change on the target page. Problems: `;
-  const tail =
-    ` Re-extract using plain-language descriptions of the content rather than ` +
-    `brittle selectors. Keep exactly these JSON field names: ${FROZEN_FIELDS}. ` +
-    `published_at must be an ISO date or null. Fix the selectors for the ` +
-    `current DOM.`;
-
-  const grouped = groupByField(issues);
-  const budget = maxChars - head.length - tail.length;
-
-  let body = "";
-  for (const [i, entry] of grouped.entries()) {
-    const next = body ? `${body}; ${entry}` : entry;
-    if (next.length > budget) {
-      const note = ` (+${grouped.length - i} more)`;
-      if (body && body.length + note.length <= budget) body += note;
-      break;
-    }
-    body = next;
-  }
-  if (!body) body = "required fields came back empty";
-
-  return `${head}${body}.${tail}`.slice(0, maxChars);
+export function buildHealPrompt(source: HitSource, issues: string[]): string {
+  return [
+    `The ${source} scraper output failed schema validation after a likely site layout change.`,
+    `Missing or invalid fields: ${issues.join("; ")}.`,
+    `Re-extract using plain-language descriptions: title (product or post name), url (item permalink), snippet (tagline, subtitle, or first line), published_at (date if shown, else null), source_domain (host of url).`,
+    `Keep the same JSON field names: title, url, snippet, published_at, source_domain.`,
+    `Fix selectors for the current DOM. Public HTML only. Do not require login.`,
+  ]
+    .join(" ")
+    .slice(0, 1000);
 }
 
-/** `title: empty title (4 rows)` — one line per distinct field problem. */
-function groupByField(issues: IssueDetail[]): string[] {
-  const counts = new Map<string, number>();
-  for (const issue of issues) {
-    const key = `${issue.path}: ${issue.message}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()].map(([key, n]) =>
-    n > 1 ? `${key} (${n} rows)` : key,
-  );
+export function isValidationSuccess(result: ValidationResult): boolean {
+  return result.ok.length > 0 && result.issues.length === 0;
+}
+
+/**
+ * Live chaos heal: the hosted fixture has two selector sets (index vs
+ * broken.html). Ask the extractor to accept both so we do not brick the
+ * original page while proving a real DOM break.
+ */
+export function buildChaosDualSelectorHealPrompt(issues: string[]): string {
+  return [
+    `The chaos listing failed schema validation after a DOM redesign.`,
+    `Issues: ${issues.join("; ")}.`,
+    `Support BOTH layouts on this fixture.`,
+    `Layout A (original cards): each article.hit-card; title .claim-title; url a.hit[href]; snippet .hit-snippet; published_at .hit-date[datetime].`,
+    `Layout B (redesign table): each tr.launch-row; title td.name; url a.permalink[href]; snippet td.blurb; published_at time[datetime].`,
+    `Keep JSON field names title, url, snippet, published_at, source_domain.`,
+    `Public HTML only. No login.`,
+  ]
+    .join(" ")
+    .slice(0, 1000);
 }

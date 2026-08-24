@@ -5,7 +5,9 @@ dist/
 .env
 .env.local
 *.log
+*.tsbuildinfo
 .DS_Store
+docs/proof/tingle/live/
 
 # Mock proof runs are throwaway — regenerate them any time with
 # `npm run prove:tingle-live` / `prove:tingle-heal`.

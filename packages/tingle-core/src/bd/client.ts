@@ -1,4 +1,5 @@
 import type { TingleConfig } from "../config.js";
+import { fetchT } from "../edge/fetchT.js";
 
 /** Whatever the collector's trigger schema expects: `{url}`, `{keyword, country}`, … */
 export type TriggerInput = Record<string, string | number | boolean>;
@@ -40,10 +41,22 @@ export function classifyHealStatus(
  * a new pinned id in env — not a code change.
  */
 export class BrightDataClient {
+  /** Every Tingle job records `POST /dca/trigger` here — never a dashboard run. */
+  readonly triggerLog: { at: string; collectorId: string; path: "/dca/trigger" }[] =
+    [];
+
   constructor(private readonly config: TingleConfig) {}
 
   get mock() {
     return this.config.mock;
+  }
+
+  noteTransport(path: "/dca/trigger", collectorId: string): void {
+    this.triggerLog.push({
+      at: new Date().toISOString(),
+      collectorId,
+      path,
+    });
   }
 
   private headers() {
@@ -63,13 +76,52 @@ export class BrightDataClient {
     return res.json().catch(() => ({}));
   }
 
+  /**
+   * `GET /dca/collectors_list` — reuse an existing c_* rather than creating.
+   * https://docs.brightdata.com/api-reference/scraper-studio-api/list-scrapers
+   */
+  async listCollectors(): Promise<
+    { id: string; name: string; status?: string }[]
+  > {
+    const res = await this.fetchRetry(
+      this.url("/dca/collectors_list"),
+      { headers: this.headers() },
+    );
+    const body = await this.json(res);
+    if (!res.ok) {
+      throw new BrightDataError("list collectors failed", res.status, body);
+    }
+    const rows = Array.isArray(body)
+      ? body
+      : ((body as { data?: unknown[] }).data ?? []);
+    return rows
+      .map((c) => {
+        const row = c as {
+          id?: string;
+          collector_id?: string;
+          name?: string;
+          status?: string;
+          active?: boolean;
+        };
+        return {
+          id: row.id ?? row.collector_id ?? "",
+          name: row.name ?? "",
+          status:
+            row.status ??
+            (row.active === false ? "inactive" : row.active ? "active" : undefined),
+        };
+      })
+      .filter((c) => c.id);
+  }
+
   /** `POST /dca/trigger` — the production path for every Tingle job. */
   async triggerCollection(
     collectorId: string,
     inputs: TriggerInput[],
   ): Promise<string> {
     requireCollector(collectorId);
-    const res = await fetch(
+    this.noteTransport("/dca/trigger", collectorId);
+    const res = await this.fetchRetry(
       this.url("/dca/trigger", { collector: collectorId, queue_next: "1" }),
       { method: "POST", headers: this.headers(), body: JSON.stringify(inputs) },
     );
@@ -114,10 +166,16 @@ export class BrightDataClient {
     const started = Date.now();
 
     while (Date.now() - started < timeoutMs) {
-      const res = await fetch(this.url("/dca/dataset", { id: collectionId }), {
-        headers: this.headers(),
-      });
+      const res = await this.fetchRetry(
+        this.url("/dca/dataset", { id: collectionId }),
+        { headers: this.headers() },
+      );
       const body = await this.json(res);
+      if (res.status === 202) {
+        await sleep(intervalMs);
+        continue;
+      }
+      assertPollHttp(res, body);
 
       if (Array.isArray(body)) {
         if (body.length > 0) return body;
@@ -153,12 +211,11 @@ export class BrightDataClient {
   /** `POST /dca/collectors/{c_*}/refactor_template` — heal in place. */
   async triggerHeal(collectorId: string, prompt: string): Promise<unknown> {
     requireCollector(collectorId);
-    const res = await fetch(
+    const res = await this.fetchRetry(
       this.url(`/dca/collectors/${encodeURIComponent(collectorId)}/refactor_template`),
       {
         method: "POST",
         headers: this.headers(),
-        // The API caps the heal prompt at 1000 chars.
         body: JSON.stringify({ prompt: prompt.slice(0, 1000) }),
       },
     );
@@ -178,16 +235,12 @@ export class BrightDataClient {
     opts: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<HealProgress> {
     requireCollector(collectorId);
-    // 15 minutes, not 10. A heal asked for a field the page does not actually
-    // contain loops through css_selector_extractor → code_fixer →
-    // step_preview_runner many times before settling, and timing out mid-loop
-    // leaves a job still running server-side that you then reconcile by hand.
-    const timeoutMs = opts.timeoutMs ?? 900_000;
+    const timeoutMs = opts.timeoutMs ?? 600_000;
     const intervalMs = opts.intervalMs ?? 5_000;
     const started = Date.now();
 
     while (Date.now() - started < timeoutMs) {
-      const res = await fetch(
+      const res = await this.fetchRetry(
         this.url(
           `/dca/collectors/${encodeURIComponent(collectorId)}/refactor_template/progress`,
         ),
@@ -198,6 +251,7 @@ export class BrightDataClient {
         preview_result?: unknown;
         preview?: unknown;
       };
+      assertPollHttp(res, body);
       const status = String(body.status ?? "unknown").toLowerCase();
       if (classifyHealStatus(status) !== "running") {
         return {
@@ -222,7 +276,7 @@ export class BrightDataClient {
   ): Promise<unknown> {
     requireCollector(collectorId);
     const approve = opts.approve ?? true;
-    const res = await fetch(
+    const res = await this.fetchRetry(
       this.url(
         `/dca/collectors/${encodeURIComponent(collectorId)}/resume_automation_job`,
       ),
@@ -245,6 +299,36 @@ export class BrightDataClient {
     }
     return body;
   }
+
+  /**
+   * Retry 5xx / network the way Bright Data's Node sample does. 4xx fails
+   * fast except 429, which backs off.
+   */
+  private async fetchRetry(
+    url: string,
+    init: RequestInit,
+    attempts = 3,
+  ): Promise<Response> {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const res = await fetchT(url, init, 30_000);
+        if (res.status >= 500 || res.status === 429) {
+          lastErr = new BrightDataError(`transient ${res.status}`, res.status);
+          await sleep(1_000 * (i + 1));
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        await sleep(1_000 * (i + 1));
+      }
+    }
+    if (lastErr instanceof BrightDataError) throw lastErr;
+    throw lastErr instanceof Error
+      ? lastErr
+      : new BrightDataError(String(lastErr));
+  }
 }
 
 function requireCollector(collectorId: string): void {
@@ -252,6 +336,19 @@ function requireCollector(collectorId: string): void {
     throw new BrightDataError(
       "no collector id supplied — pin TINGLE_C_* in .env rather than creating a new collector",
     );
+  }
+}
+
+function assertPollHttp(res: Response, body: unknown): void {
+  if (res.status === 202) return;
+  if (res.status === 401 || res.status === 403) {
+    throw new BrightDataError("Bright Data rejected the token", res.status, body);
+  }
+  if (res.status === 404) {
+    throw new BrightDataError("collector or collection not found", res.status, body);
+  }
+  if (!res.ok) {
+    throw new BrightDataError(`poll failed HTTP ${res.status}`, res.status, body);
   }
 }
 
