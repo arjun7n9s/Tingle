@@ -1,3 +1,5 @@
+.cursor/rules/
+
 node_modules/
 dist/
 .next/
