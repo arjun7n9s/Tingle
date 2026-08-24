@@ -39,5 +39,4 @@ To restore, `git checkout` the good `index.html`.
 - Public page, no login, no paywall.
 - Every product name and link on the page is synthetic. Nothing here refers to
   a real company.
-- Dates are static. Phase 1 does not care; Phase 2's "shipped in the last
-  7 days" pile will want them regenerated or frozen against a fixed clock.
+- Dates are static so the shipped-in-7-days pile is deterministic in proofs.

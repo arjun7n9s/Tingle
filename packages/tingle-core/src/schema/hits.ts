@@ -89,8 +89,8 @@ export function domainFromUrl(url: string): string {
  * that must still reach the validator as a failure.
  *
  * Deliberately assigns no fallback values to required fields. Defaulting a
- * missing title to "unknown" (as Changelog Radar's normalizer does for
- * package_name) would hide exactly the breakage we are trying to detect.
+ * missing title to "unknown" would hide exactly the breakage we are trying
+ * to detect.
  */
 export function normalizeRow(source: HitSource, row: unknown): unknown {
   if (!row || typeof row !== "object") return row;

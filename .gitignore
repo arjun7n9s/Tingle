@@ -33,3 +33,6 @@ progress.md
 
 # Local first-look request fixtures
 .fixtures/
+
+# Local probe scripts (read .env) — not part of the product
+/scripts/

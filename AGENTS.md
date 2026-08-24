@@ -15,16 +15,15 @@ Two jobs, always: what already exists that they should build on, and what
 
 ## Build order
 
-The build order (extractor first, then claim JSON, then product, then watch,
-then vault, then dedup) is done through Phase 6. Phase 7 is the demo pack.
+Extractor first, then claim JSON, then product, then watch, then vault.
 
 1. Own the collectors, validate their output, heal them in place, trigger from
    code.
-2. Claim → first look → three piles, as JSON. No UI required.
+2. Claim → first look → piles, as JSON. No UI required.
 3. Product shell on top of that JSON.
 4. The watch loop: schedule, diff, classify, urgency, email.
 5. Encrypted storage, dedup, mute, claim lock.
-6. Proof artifacts, clone README, demo script, optional CI heal.
+6. Proof artifacts, clone README, optional CI heal.
 
 ## Hard rules
 

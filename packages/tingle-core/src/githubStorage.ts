@@ -56,7 +56,7 @@ export function renderTingleFiles(
     "# .tingle/",
     "",
     "Canonical watch for this project. Same shape as Tingle's encrypted vault;",
-    "this tree is the opt-in GitHub copy. See docs/tingle/format.md.",
+    "this tree is the opt-in GitHub copy (profile, baseline, events).",
     "",
   ].join("\n");
   if (snap.baseline) {
