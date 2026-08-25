@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 
 const FRAMES = [
@@ -41,12 +40,10 @@ export function LostSpidey() {
   return (
     <div className="lost-stage" aria-hidden="true">
       {FRAMES.map((src, i) => (
-        <Image
+        <img
           key={src}
           src={src}
           alt=""
-          fill
-          sizes="22rem"
           className={`lost-frame${i === frame ? " is-on" : ""}${i === 3 && frame === 3 ? " is-end" : ""}`}
         />
       ))}

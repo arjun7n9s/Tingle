@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import { tingle } from "@/lib/tingle";
 import { AppChrome } from "../../AppChrome";
 import {
@@ -63,9 +62,7 @@ type Project = {
   last_patentability?: Patentability;
 };
 
-export function ProjectDesk() {
-  const params = useParams<{ id: string }>();
-  const id = typeof params.id === "string" ? params.id : params.id?.[0] ?? "";
+export function ProjectDesk({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
