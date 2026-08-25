@@ -396,4 +396,34 @@ describe("isClaimRelevant", () => {
       true,
     );
   });
+
+  it("does not treat software/autonomously glue as the same invention", () => {
+    const { fingerprints } = proposeClaim({
+      claim:
+        "Software that autonomously builds other software from an idea, using agents in parallel terminals",
+    });
+    assert.equal(
+      isClaimRelevant(
+        {
+          title:
+            "Show HN: Archon – 4 parallel Claude terminals that build software autonomously",
+          snippet: "software autonomously",
+          url: "https://news.ycombinator.com/item?id=archon",
+        },
+        fingerprints,
+      ),
+      false,
+    );
+    assert.equal(
+      isClaimRelevant(
+        {
+          title: "NPM for APIs: repository of tools for AI Agents",
+          snippet: "repository of tools for AI Agents",
+          url: "https://news.ycombinator.com/item?id=npm-apis",
+        },
+        fingerprints,
+      ),
+      false,
+    );
+  });
 });

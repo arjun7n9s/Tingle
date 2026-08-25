@@ -132,6 +132,7 @@ function isPatentHit(hit: PileableHit): boolean {
 
 function isStandOn(hit: PileableHit): boolean {
   if (isPatentHit(hit)) return false;
+  if (hit.source === "hn" || hostOf(hit) === "news.ycombinator.com") return true;
   if (STAND_HOSTS.has(hostOf(hit))) return true;
   if (hit.source === "search" && /github\.com/i.test(hit.url)) return true;
   return STAND_TITLE.test(`${hit.title} ${hit.snippet}`);

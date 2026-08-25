@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { tingle } from "@/lib/tingle";
-import { AppChrome } from "../../AppChrome";
+import { AppChrome } from "./AppChrome";
 import {
   BudgetBar,
   ChatLog,
@@ -14,8 +14,8 @@ import {
   PileTally,
   type Patentability,
   type Piles,
-} from "../../ui";
-import { SpideyWait } from "../../Spidey";
+} from "./ui";
+import { SpideyWait } from "./Spidey";
 
 type Project = {
   id: string;

@@ -18,6 +18,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: "/tingle/projects/:id",
+        destination: "/tingle/file?id=:id",
+      },
+      {
         source: "/tingle-api/:path*",
         destination: `${tingleApi}/:path*`,
       },

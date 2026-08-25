@@ -309,6 +309,10 @@ const WEAK_UNI = new Set(
     "ways",
     "like",
     "also",
+    "idea",
+    "ideas",
+    "software",
+    "softwares",
     "build",
     "builds",
     "building",
@@ -387,6 +391,7 @@ const AMBIENT_UNI = new Set(
 const GENERIC_TECH = new Set(
   [
     "autonomous",
+    "autonomously",
     "automation",
     "testing",
     "tested",
@@ -479,6 +484,16 @@ const GENERIC_TECH = new Set(
     "alerting",
     "directly",
     "inside",
+    "software",
+    "codebase",
+    "agent",
+    "agents",
+    "claude",
+    "terminal",
+    "terminals",
+    "parallel",
+    "repository",
+    "startup",
   ].map((w) => w.toLowerCase()),
 );
 
@@ -528,16 +543,18 @@ export function isStrongToken(token: string): boolean {
 }
 
 export function isAmbientToken(token: string): boolean {
-  return AMBIENT_UNI.has(token.toLowerCase());
+  const t = token.toLowerCase();
+  return AMBIENT_UNI.has(t) || AMBIENT_UNI.has(stemToken(t));
 }
 
 export function isDistinctiveToken(token: string): boolean {
   const t = token.toLowerCase();
-  return isStrongToken(t) && !GENERIC_TECH.has(t) && !AMBIENT_UNI.has(t);
+  return isStrongToken(t) && !isGenericTech(t) && !isAmbientToken(t);
 }
 
 export function isGenericTech(token: string): boolean {
-  return GENERIC_TECH.has(token.toLowerCase());
+  const t = token.toLowerCase();
+  return GENERIC_TECH.has(t) || GENERIC_TECH.has(stemToken(t));
 }
 
 export function isBroadSetting(token: string): boolean {
@@ -564,7 +581,7 @@ export function isContentFingerprint(fp: string): boolean {
   const parts = fp.toLowerCase().split(/\s+/).filter(Boolean);
   if (!parts.length || parts.every(isAmbientToken)) return false;
   if (parts.length >= 2) {
-    return parts.some((p) => isDistinctiveToken(p) || isGenericTech(p));
+    return parts.some(isDistinctiveToken);
   }
   const one = parts[0] ?? "";
   if (isBroadSetting(one) && !isGenericTech(one)) return false;
@@ -691,13 +708,14 @@ export function isClaimRelevant(
   if (!distinctiveHits.length && genericHits.length && claimHasDistinctive) {
     return false;
   }
-  if (mustHits.some((m) => m.includes(" "))) return true;
+  if (mustHits.some((m) => m.includes(" ") && m.split(/\s+/).some(isDistinctiveToken))) {
+    return true;
+  }
   if (distinctiveHits.length >= 1) {
     if (distinctiveHits.some((m) => m.length >= 6)) return true;
     if (distinctiveHits.length >= 2) return true;
     if (genericHits.length) return true;
   }
-  if (!claimHasDistinctive && genericHits.length) return true;
   const dist = distinctiveHits.filter((m) => !m.includes(" "));
   return dist.length >= 2 && dist.some((m) => m.length >= 6);
 }
